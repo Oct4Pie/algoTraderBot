@@ -1,214 +1,125 @@
-# SuperTrend + Chronos Signal Head (NQ futures, 3-min)
+# SuperTrend AI Bot + PPO trailing exit (NQ futures, 3-min)
 
-A two-head XGBoost model that **grades SuperTrend flip events** on NQ
-futures (3-min bars). For each flip candidate it outputs:
+A single-file live **TopstepX bot** that trades SuperTrend flips on NQ 3-min
+bars, graded by a Chronos+XGBoost AI head and exited by a **PPO-learned
+trailing stop**:
 
-- **`proba`** — probability the flip becomes a winning trade (0..1)
-- **`r_hat`** — predicted peak R-multiple the trade can reach (0..15)
+```
+SuperTrend flip  →  AI grades it (proba)  →  enter if proba ≥ 0.35
+                 →  PPO trails the stop bar-by-bar until exit
+```
 
-It does **not** generate signals — you detect a SuperTrend flip (ATR-band
-direction change) yourself, then call this model to decide whether the
-flip is worth trading and how far it might run.
+- **Entry** — a SuperTrend flip is the candidate; the Chronos+XGBoost head
+  scores it (`proba` = P(win)) and the bot enters only when `proba ≥ 0.35`.
+- **Exit** — instead of a fixed 2R take-profit, a small PPO policy decides each
+  bar *how tightly to trail the stop* (it only ever ratchets in your favor).
 
-Trained on 95,421 flip signals, 2021-04-25 → 2026-05-04 (NQ 3-min, UTC).
+> ⚠️ **Educational — places LIVE orders.** Run it on a practice/evaluation
+> account first. NQ 3-min only (the model's training scope).
 
-This package also ships a **PPO trailing-exit** policy that replaces the
-fixed 2R take-profit with a learned trailing stop — see
-[the PPO trailing exit](#ppo-trailing-exit) below.
+## Quick start
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt          # first run downloads a ~45MB Chronos checkpoint
+```
+
+Add your TopstepX credentials (the API **key**, not your password) — either edit
+the top of `supertrend_ai_bot.py`, or use env vars:
+
+```bash
+export TOPSTEPX_USERNAME="your_login"
+export TOPSTEPX_API_KEY="your_api_key"
+export TOPSTEPX_ACCOUNT=""                # blank = first tradable account
+python supertrend_ai_bot.py
+```
+
+The bot prints your tradable accounts on startup — make sure it picks your
+**practice** account (set `TOPSTEPX_ACCOUNT` to its id/name to pin it).
+
+## How the PPO exit works
+
+Once in a trade, each bar the policy picks a trailing-stop distance from a set
+of ATR multiples (`[0.75, 1.0, 1.5, 2.0, 2.5, 3.5]`) and the bot updates the
+live stop via `/Order/modify`. The stop never loosens. A trade ends on a stop
+hit, a 4-hour max-hold, or end of data. The policy observes 7 inputs (all in
+R-multiples so longs/shorts look identical): unrealized R, max favorable
+excursion, stop distance, ATR/risk, time in trade, momentum, and distance from
+the SuperTrend line.
+
+Two config flags in `supertrend_ai_bot.py` control the exit:
+
+- `USE_PPO_EXIT` (default `True`) — use the PPO trail; set `False` to fall back
+  to the original fixed-2R bracket.
+- `USE_TRAILING_STOP` (default `True`) — `True` enters with a broker-native
+  trailing stop (follows price tick-by-tick; PPO tightens its distance each
+  bar); `False` uses a plain stop the PPO reprices each bar. **For a first
+  practice run, `False` is the safest — it relies only on the verified
+  `stopPrice` modify.**
+
+The live loop reconstructs its state from the broker if restarted mid-trade, so
+a restart won't strand an open position.
+
+## Retrain the exit (optional)
+
+```bash
+python train_ppo_exit.py                  # full train (~600k steps)
+python train_ppo_exit.py --quick          # 20k-step smoke test
+```
+
+Trains PPO on every SuperTrend flip in `data/NQ_3min.csv`, **filtered to the
+flips the bot would actually enter** (`proba ≥ 0.35`, cached in
+`proba_cache.npz`), holds out the last 10% of bars, benchmarks against the
+fixed-2R / constant-trail baselines, and writes `ppo_trail_exit.npz` — the
+torch-free policy the live bot loads automatically.
+
+## The AI entry head (`predict.py`)
+
+The grading model is a two-head XGBoost on top of a Chronos embedding. Verify
+the install on synthetic data:
+
+```bash
+python predict.py --demo                  # prints proba = … / r_hat = …
+```
+
+Call it directly:
+
+```python
+from predict import chronos_embedding, predict
+emb = chronos_embedding(closes)           # last 128 closes -> (256,)
+proba, r_hat = predict(emb, features)     # features: (78,) -> P(win), peak R
+```
+
+Inputs are `concat([embedding_256, hand_crafted_78])` (shape 334). The bot fills
+only the two public hand-crafted slots (`adx`, `adx_slope`) and leaves the 76
+proprietary ones as `nan` (XGBoost handles missing natively — reduced but real
+accuracy). The model was trained on 95,421 flips, 2021-04-25 → 2026-05-04.
 
 ## What's in this package
 
 | file | purpose |
 |---|---|
-| `signal_head.json` | XGBoost classifier (native format) → `proba` |
-| `risk_head.json` | XGBoost regressor (native format) → `r_hat` |
+| `supertrend_ai_bot.py` | the live bot — entry grading + PPO trailing exit |
+| `trail_exit_env.py` | PPO exit env, trade simulator + torch-free policy |
+| `train_ppo_exit.py` | trains the trailing-exit policy |
+| `precompute_proba.py` | batch-grades every flip with the entry model (cached) |
+| `predict.py` | standalone entry-head inference |
+| `ppo_trail_exit.npz` | trained PPO policy (loaded live) |
+| `signal_head.json` / `risk_head.json` | XGBoost entry heads (`proba` / `r_hat`) |
 | `metadata.json` | training spans, dims, holdout stats |
-| `predict.py` | complete runnable inference script |
-| `supertrend_ai_bot.py` | live TopstepX bot (entry grading + exit) |
-| `trail_exit_env.py` | PPO trailing-exit env, simulator + numpy policy |
-| `train_ppo_exit.py` | trains the trailing-exit policy from `data/NQ_3min.csv` |
-| `precompute_proba.py` | grades every flip with the entry model (cached) |
-| `ppo_trail_exit.npz` | trained trailing-exit policy (torch-free, loaded live) |
-| `proba_cache.npz` | cached per-flip `proba` (so re-training is instant) |
-| `data/NQ_3min.csv` | NQ 3-min OHLCV history used to train the exit |
+| `data/NQ_3min.csv` | NQ 3-min OHLCV history (for retraining) |
 | `requirements.txt` | python dependencies |
-
-The models are in XGBoost's **native JSON format** — they load on any
-platform/version with plain `xgboost`, no pickle, no custom classes.
-
-## Setup (one time)
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Verify everything works (uses synthetic data; first run downloads the
-~45 MB `amazon/chronos-bolt-tiny` checkpoint from HuggingFace and caches
-it):
-
-```bash
-python predict.py --demo
-```
-
-You should see a `proba = ...` / `r_hat = ...` line. That confirms the
-full pipeline (Chronos embedding → XGBoost heads) is working.
-
-## Running on real data
-
-```bash
-python predict.py --closes closes.csv --features features.csv
-```
-
-- `closes.csv` — one closing price per line, **at least 128 rows**,
-  oldest → newest, 3-min NQ bars ending at the signal bar.
-- `features.csv` — **78 values**, one per line (layout below). Unknown
-  values can be written as `nan` — XGBoost handles missing natively
-  (predictions degrade gracefully but accuracy is best with all 78).
-
-Or call it from your own code:
-
-```python
-from predict import chronos_embedding, predict
-
-emb = chronos_embedding(closes)        # last 128 closes -> (256,)
-proba, r_hat = predict(emb, features)  # features: (78,)
-```
-
-## Input contract (what the model expects)
-
-Feature vector = `concat([embedding_256, hand_crafted_78])` → shape (334,).
-
-**1. `embedding_256`** — handled for you by `predict.py`:
-`amazon/chronos-bolt-tiny` encoder over the **log** of the last 128
-closes, masked-mean pooled over the hidden states. (The exact code is in
-`chronos_embedding()` — if you re-implement, match it exactly.)
-
-**2. `hand_crafted_78`** — computed at the signal bar:
-
-| index | content |
-|---|---|
-| [0:76] | 76 engineered market features (fractional-differencing family: multi-horizon momentum/volatility/trend-state transforms of OHLCV) |
-| [76] | `adx` — 14-period Average Directional Index |
-| [77] | `adx_slope` — bar-over-bar change of adx |
-
-The 76 engineered features come from a proprietary feature pipeline that
-is not included. Practical options: (a) run with your own feature set in
-those slots set to `nan` and rely on the embedding + adx (works, reduced
-accuracy), or (b) contact the author about the feature pipeline.
-
-**Preprocessing rule:** leave NaN as NaN; zero out ±inf
-(`np.nan_to_num(x, nan=np.nan, posinf=0.0, neginf=0.0)`).
-
-**r_hat inversion (already done in `predict.py`):** the risk head was
-trained on `log1p(R)` — raw regressor output must be passed through
-`clip(expm1(out), 0, 15)`.
-
-## Using the outputs
-
-Production operating rules that worked well:
-
-- **Entry floor**: only trade flips with `proba >= 0.35`. The proba
-  distribution is conservative (median ≈ 0.29, max ≈ 0.57) — 0.35–0.50
-  is the useful band; you will not see 0.8s.
-- **Sizing**: scale position size with proba (small base size below 0.40,
-  larger only above it).
-- **Take-profit**: `TP = clip(0.8 * r_hat, 1.5, 8.0)` in R-multiples.
-
-## PPO trailing exit
-
-By default the live bot exits at a fixed **2R** take-profit. The PPO
-trailing exit replaces that with a learned **trailing stop**: the entry
-logic is unchanged (SuperTrend flip graded by the Chronos+XGBoost head),
-but once in a trade a small reinforcement-learning policy decides each bar
-*how tightly to trail the stop*.
-
-**What the agent controls.** Each bar it picks a trailing-stop distance
-from a discrete set of ATR multiples (`[0.75, 1.0, 1.5, 2.0, 2.5, 3.5]`).
-The stop only ever ratchets in your favor — it never loosens. A trade ends
-on a stop hit, a max-hold timeout (80 bars = 4h), or end of data.
-
-**What the agent sees** (7 inputs, all in R-multiples so longs and shorts
-look identical): unrealized R, max favorable excursion, distance to the
-current stop, ATR/initial-risk, time in trade, recent momentum, and
-distance from the SuperTrend line. Reward each step is the change in
-(un)realized R, so it telescopes to the trade's final realized R.
-
-### Train it
-
-```bash
-pip install -r requirements.txt          # adds gymnasium + stable-baselines3
-python train_ppo_exit.py                  # full train (~600k steps)
-python train_ppo_exit.py --quick          # 20k-step smoke test
-python train_ppo_exit.py --timesteps 1000000   # train harder
-```
-
-This catalogs every SuperTrend flip in `data/NQ_3min.csv`, **keeps only the
-flips the live bot would actually enter** (`proba >= 0.35`, the same floor as
-live trading — graded once and cached in `proba_cache.npz`), splits the last
-10% of bars off as an untouched holdout, trains PPO on the rest, and prints a
-holdout comparison of the PPO exit against the fixed-2R and constant-trail
-baselines (same entries, different exits). Pass `--proba-floor 0` to train on
-all flips instead. It writes two files:
-
-- `ppo_trail_exit.npz` — the policy weights as plain dense layers. **This is
-  what the live bot loads.** The forward pass runs in pure numpy, so the bot
-  never imports torch/SB3 next to xgboost (which would risk the OpenMP
-  segfault described under *Caveats*).
-- `ppo_trail_exit_sb3.zip` — the full Stable-Baselines3 model, for resuming
-  training or inspection.
-
-### Run it live
-
-`supertrend_ai_bot.py` picks the exit automatically. The **entry** is
-unchanged either way — the bot still only takes flips with `proba >= 0.35`
-(`PROBA_FLOOR`). What changes is the exit:
-
-- If `ppo_trail_exit.npz` is present (and `USE_PPO_EXIT = True`, the default),
-  the bot enters with a **protective stop only** at the SuperTrend line and
-  the PPO manages it every bar — no fixed take-profit.
-- If the file is missing, or you set `USE_PPO_EXIT = False`, it falls back to
-  the original fixed-2R bracket. Nothing else changes.
-
-**Two exit mechanisms** (config `USE_TRAILING_STOP`, both driven by the same
-per-bar PPO decision and an `/Order/modify` call):
-
-- `True` (default) — enter with a **broker-native trailing stop** that follows
-  price tick-by-tick on its own; each bar the PPO *tightens* its follow
-  distance. You get intra-bar protection between the bot's 3-min wake-ups plus
-  bar-level policy control. The policy only ever ratchets tighter.
-- `False` — enter with a **plain stop**; each bar the PPO reprices the stop
-  level directly. No protection between bars, but no dependence on the broker's
-  trailing-order semantics.
-
-The live loop reconstructs its state from the broker if the bot is restarted
-mid-trade (side/entry from the position, risk from the working stop), so a
-restart won't strand an open position.
-
-> ⚠️ The trailing exit issues **live stop-modify orders** (`/Order/modify`)
-> every bar. Test it on a practice/evaluation account first.
->
-> ⚠️ The native-trailing-stop path (`USE_TRAILING_STOP = True`) uses the
-> ProjectX trailing-bracket type (`5`) and the `/Order/modify` `trailPrice`
-> field — both confirmed in the ProjectX API docs. Two residual unknowns the
-> docs don't pin down: whether `trailPrice` is a price distance (assumed here —
-> we send `ticks * tickSize`) or a raw tick count, and whether modifying it
-> re-anchors the trail. Verify on a practice account, or use
-> `USE_TRAILING_STOP = False` (plain stop reprice) which relies only on the
-> already-working `stopPrice` modify.
-
-## Holdout performance (30 days out-of-sample)
-
-- 1,406 flip signals, 28% base win rate
-- At proba ≥ 0.50: 60% WR, mean +1.37R, profit factor 4.3 (small sample)
 
 ## Caveats
 
-- **Scope**: trained on NQ 3-min UTC bars only. Other tickers or
-  timeframes are out of distribution — expect degraded results.
-- **torch + xgboost OpenMP conflict (macOS)**: loading both libraries in
-  one process can segfault. `predict.py` already handles this — it
-  computes the Chronos embedding in an isolated subprocess automatically.
-  If you write your own integration, keep torch and xgboost in separate
-  processes (or at minimum try `KMP_DUPLICATE_LIB_OK=TRUE`).
-- Internet needed once (HuggingFace checkpoint download); offline after.
+- **Scope**: NQ 3-min UTC bars only — other tickers/timeframes are out of
+  distribution.
+- **Native trailing stop**: the `USE_TRAILING_STOP = True` path uses the
+  ProjectX trailing bracket (`type 5`) and `/Order/modify` `trailPrice` — both
+  in the API docs, but the docs don't pin down `trailPrice` units (we send
+  `ticks × tickSize`) or re-anchor behavior. Verify on practice, or use
+  `USE_TRAILING_STOP = False`.
+- **torch + xgboost OpenMP conflict (macOS)**: loading both in one process can
+  segfault. The bot avoids it — Chronos runs in a subprocess and the PPO policy
+  runs in pure numpy. (`KMP_DUPLICATE_LIB_OK=TRUE` is a fallback.)
+- Internet needed once for the HuggingFace checkpoint; offline after.
