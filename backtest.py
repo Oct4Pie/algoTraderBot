@@ -74,10 +74,12 @@ def run_backtest(symbol="NQ", start=None, end=None):
     if symbol != "NQ":
         log.warning("⚠️  models are NQ-trained; %s is out of distribution", symbol)
 
+    point_value = config.POINT_VALUES.get(symbol)
+    tick_value = tick * point_value if point_value else 0.0
     df = _load(symbol, end)
     sim = SimBroker(df, tick)
     ctx = bot.BotContext(sim, account_id=0, contract_id=symbol, tick_size=tick,
-                         log_candles=False)
+                         tick_value=tick_value, log_candles=False)
 
     start_idx = WINDOW
     if start:

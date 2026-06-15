@@ -119,9 +119,25 @@ USE_TRAILING_STOP = False                    # False → PPO reprices the stop e
 **4. Run:**
 
 ```bash
-python bot.py                 # uses config.SIZE contracts
-python bot.py --size 3         # override contracts per trade from the CLI
+python bot.py                      # uses config.SIZE contracts
+python bot.py --size 3             # fixed: 3 contracts per trade
+python bot.py --risk 500           # risk-based: ~$500 risked per trade
+python bot.py --risk 500 --max-contracts 5
 ```
+
+**Sizing** — use a fixed size *or* risk-based sizing (not both). With `--risk`
+(or `config.RISK_PER_TRADE`), contracts are sized from the stop so each trade
+risks ~that many dollars:
+
+```
+contracts = min(MAX_CONTRACTS,
+                max(1, floor(risk_$ / (stop_ticks × tick_value))))
+```
+
+`tick_value` is derived from `config.POINT_VALUES` (e.g. NQ = $20/pt × 0.25 =
+$5/tick). A tighter stop ⇒ more contracts, a wider stop ⇒ fewer, so dollar risk
+per trade stays roughly constant (handy with the 0.5×ATR stop, which varies with
+volatility).
 
 It prints your tradable accounts on startup — make sure it picks the **practice**
 one. Every candle, every strategy's proba (with a TAKE/skip flag), each entry,

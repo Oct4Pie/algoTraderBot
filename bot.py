@@ -37,12 +37,13 @@ class BotContext:
     loop and the backtester so they run identical per-bar logic."""
 
     def __init__(self, client, account_id, contract_id, tick_size,
-                 log_candles=True):
+                 tick_value=0.0, log_candles=True):
         import trail_exit_env as tee     # numpy-only PPO policy loader
         self.client = client
         self.account_id = account_id
         self.contract_id = contract_id
         self.tick_size = tick_size
+        self.tick_value = tick_value      # $ per tick per contract (for risk sizing)
         self.log_candles = log_candles
         self.tee = tee
         self.strategies = strat.make_strategies()
@@ -55,6 +56,29 @@ class BotContext:
     def exit_mode(self):
         return ("PPO native-trail" if self.trailing else
                 "PPO stop-reprice" if self.policy else f"fixed {config.RR}R")
+
+    @property
+    def sizing_mode(self):
+        if config.RISK_PER_TRADE and self.tick_value:
+            return f"risk ${config.RISK_PER_TRADE:g}/trade (≤{config.MAX_CONTRACTS})"
+        return f"fixed {config.SIZE}"
+
+
+def position_size(ctx: BotContext, stop_ticks: int) -> int:
+    """Contracts for a trade: risk-based when RISK_PER_TRADE > 0 (size from the
+    stop distance), else the fixed SIZE — capped at MAX_CONTRACTS.
+
+        size = min(MAX_CONTRACTS,
+                   risk_sizing and stop_ticks
+                       ? max(1, floor(RISK_PER_TRADE / (|stop_ticks| × tick_value)))
+                       : SIZE)
+    """
+    if config.RISK_PER_TRADE and ctx.tick_value and stop_ticks:
+        per_contract = abs(stop_ticks) * ctx.tick_value
+        n = max(1, int(config.RISK_PER_TRADE // per_contract))
+    else:
+        n = config.SIZE
+    return min(config.MAX_CONTRACTS, n)
 
 
 def handle_bar(ctx: BotContext, bars, trade_state):
@@ -105,6 +129,7 @@ def handle_bar(ctx: BotContext, bars, trade_state):
     s, sig = max(candidates, key=lambda c_: c_[1].proba)   # highest proba wins
 
     stop_ticks = max(1, round(sig.risk / ctx.tick_size))
+    size = position_size(ctx, stop_ticks)
     side = SIDE["BUY"] if sig.direction > 0 else SIDE["SELL"]
     side_txt = "LONG" if sig.direction > 0 else "SHORT"
 
@@ -114,23 +139,21 @@ def handle_bar(ctx: BotContext, bars, trade_state):
                        "mfe": 0.0, "trail_ticks": stop_ticks, "strategy": s}
         if ctx.trailing:
             c.place_market_with_trail(ctx.account_id, ctx.contract_id,
-                                      side=side, size=config.SIZE,
-                                      trail_ticks=stop_ticks)
+                                      side=side, size=size, trail_ticks=stop_ticks)
             log.info("🎯 ENTER %s %s [%s] %d | native trail %dt | PPO (proba %.3f)",
-                     stamp, side_txt, s.name, config.SIZE, stop_ticks, sig.proba)
+                     stamp, side_txt, s.name, size, stop_ticks, sig.proba)
         else:
             c.place_market_with_stop(ctx.account_id, ctx.contract_id,
-                                     side=side, size=config.SIZE,
-                                     stop_ticks=stop_ticks)
+                                     side=side, size=size, stop_ticks=stop_ticks)
             log.info("🎯 ENTER %s %s [%s] %d | stop %dt | PPO reprice (proba %.3f)",
-                     stamp, side_txt, s.name, config.SIZE, stop_ticks, sig.proba)
+                     stamp, side_txt, s.name, size, stop_ticks, sig.proba)
     else:
         target_ticks = max(1, round(config.RR * sig.risk / ctx.tick_size))
         c.place_market_with_brackets(ctx.account_id, ctx.contract_id,
-                                     side=side, size=config.SIZE,
+                                     side=side, size=size,
                                      stop_ticks=stop_ticks, target_ticks=target_ticks)
         log.info("🎯 ENTER %s %s [%s] %d | stop %dt | target %dt (%sR)",
-                 stamp, side_txt, s.name, config.SIZE, stop_ticks, target_ticks, config.RR)
+                 stamp, side_txt, s.name, size, stop_ticks, target_ticks, config.RR)
     return trade_state
 
 
@@ -140,11 +163,15 @@ def run():
     client.authenticate()
     acct = client.pick_account(config.ACCOUNT)
     contract = client.get_active_contract(config.SYMBOL)
-    ctx = BotContext(client, acct["id"], contract["id"],
-                     float(contract["tickSize"]))
+    tick_size = float(contract["tickSize"])
+    point_value = config.POINT_VALUES.get(config.SYMBOL)
+    tick_value = float(contract.get("tickValue")
+                       or (tick_size * point_value if point_value else 0.0))
+    ctx = BotContext(client, acct["id"], contract["id"], tick_size, tick_value)
     names = "+".join(s.name for s in ctx.strategies)
-    log.info("✅ %s | %s | %d-min | [%s] | exit: %s", acct["name"],
-             ctx.contract_id, config.TIMEFRAME_MIN, names, ctx.exit_mode)
+    log.info("✅ %s | %s | %d-min | [%s] | exit: %s | size: %s", acct["name"],
+             ctx.contract_id, config.TIMEFRAME_MIN, names, ctx.exit_mode,
+             ctx.sizing_mode)
     log.info("▶ running — Ctrl-C to stop")
 
     trade_state = None
@@ -182,7 +209,12 @@ if __name__ == "__main__":
     ap.add_argument("--start", help="backtest start date (YYYY-MM-DD, inclusive)")
     ap.add_argument("--end", help="backtest end date (YYYY-MM-DD, exclusive)")
     ap.add_argument("--size", type=int,
-                    help="contracts per trade (overrides config.SIZE)")
+                    help="fixed contracts per trade (overrides config.SIZE)")
+    ap.add_argument("--risk", type=float,
+                    help="$ risk per trade; sizes contracts from the stop "
+                         "(overrides config.RISK_PER_TRADE). Use instead of --size")
+    ap.add_argument("--max-contracts", type=int,
+                    help="cap on risk-sized contracts (overrides config.MAX_CONTRACTS)")
     ap.add_argument("--retrain-exit", action="store_true",
                     help="retrain the PPO trailing-exit policy, then exit")
     ap.add_argument("--quick", action="store_true",
@@ -191,10 +223,19 @@ if __name__ == "__main__":
                     help="with --retrain-exit: PPO training steps")
     args = ap.parse_args()
 
+    if args.size is not None and args.risk is not None:
+        raise SystemExit("use either --size or --risk, not both")
+    if args.max_contracts is not None:
+        config.MAX_CONTRACTS = args.max_contracts
     if args.size is not None:
         if args.size < 1:
             raise SystemExit("--size must be >= 1")
-        config.SIZE = args.size          # runtime override (handle_bar reads config.SIZE)
+        config.SIZE = args.size
+        config.RISK_PER_TRADE = 0.0      # explicit fixed size disables risk sizing
+    if args.risk is not None:
+        if args.risk <= 0:
+            raise SystemExit("--risk must be > 0")
+        config.RISK_PER_TRADE = args.risk
 
     if args.retrain_exit:
         _retrain_exit(args.quick, args.timesteps)

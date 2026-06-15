@@ -32,6 +32,17 @@ SIZE = 1
 # Tick sizes for backtesting (live mode reads tickSize from the broker).
 TICK_SIZES = {"NQ": 0.25, "ES": 0.25, "RTY": 0.1, "YM": 1.0,
               "GC": 0.1, "SI": 0.005, "CL": 0.01}
+# Dollar value of a 1.00-point move, per contract (tick_value = tick_size × this).
+POINT_VALUES = {"NQ": 20, "ES": 50, "RTY": 50, "YM": 5,
+                "GC": 100, "SI": 5000, "CL": 1000}
+
+# Position sizing — use either a fixed SIZE or RISK_PER_TRADE (not both).
+#   SIZE           fixed contracts per trade.
+#   RISK_PER_TRADE if > 0, size from the stop instead:
+#                  contracts = floor(RISK_PER_TRADE / (stop_ticks × tick_value)),
+#                  clamped to [1, MAX_CONTRACTS]. 0 = use fixed SIZE.
+RISK_PER_TRADE = 0.0       # $ risked per trade (0 = off)
+MAX_CONTRACTS = 10         # cap on risk-sized contracts
 
 # ── strategy selection ─────────────────────────────────────────────────
 # Which strategies run. One name = single strategy; list both to run them
