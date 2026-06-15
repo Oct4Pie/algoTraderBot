@@ -49,6 +49,14 @@ class Signal:
     r_hat: float = 0.0
 
 
+def embed_context(bars: pd.DataFrame, i: int) -> np.ndarray:
+    """Chronos context embedding (1, 256) for the window ending at bar i. All
+    strategies firing on the same bar share this same context, so it is computed
+    once per bar (one Chronos subprocess pass) and reused across strategies."""
+    from futures_foundation import foundation
+    return foundation.embed_bars(bars["close"].to_numpy(float), [i], ctx=config.CTX)
+
+
 def ffm_block(bars: pd.DataFrame, i: int) -> np.ndarray:
     """76 FFM features at bar i, in the models' parquet column order. Computed
     live via futures_foundation.derive_features; absent columns → NaN."""
@@ -115,14 +123,15 @@ class Strategy(ABC):
         return Signal(self.name, d, entry, stop, risk, i, bars["time"].iloc[i])
 
     # ── grading (shared) ───────────────────────────────────────────────
-    def grade(self, bars: pd.DataFrame, sig: Signal):
-        """(proba, r_hat) from this strategy's model for the detected signal."""
-        from futures_foundation import foundation
+    def grade(self, bars: pd.DataFrame, sig: Signal, emb=None):
+        """(proba, r_hat) from this strategy's model for the detected signal.
 
-        i = sig.bar_index
-        emb = foundation.embed_bars(
-            bars["close"].to_numpy(float), [i], ctx=config.CTX)      # (1, 256)
-        hand = self._hand_features(bars, i, sig.direction).reshape(1, -1)
+        `emb` is the Chronos context embedding; strategies firing on the same bar
+        share the SAME context, so the caller computes it once (embed_context)
+        and passes it in — one Chronos pass per bar, not per strategy."""
+        if emb is None:
+            emb = embed_context(bars, sig.bar_index)
+        hand = self._hand_features(bars, sig.bar_index, sig.direction).reshape(1, -1)
         X = np.concatenate([emb, hand], axis=1).astype(np.float32)
 
         bundle = self._load_bundle()

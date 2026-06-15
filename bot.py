@@ -108,20 +108,21 @@ def handle_bar(ctx: BotContext, bars, trade_state):
                             trade_state, ctx.trailing)
         return trade_state
 
-    # Flat — detect + grade across every active strategy, take the best.
+    # Flat — detect across strategies (cheap), then grade. Strategies that fire
+    # on this bar share one Chronos embedding (same context) — computed once.
+    fired = [(s, sig) for s in ctx.strategies if (sig := s.detect(bars))]
     candidates = []
-    for s in ctx.strategies:
-        sig = s.detect(bars)
-        if sig is None:
-            continue
-        sig.proba, sig.r_hat = s.grade(bars, sig)
-        side_txt = "LONG" if sig.direction > 0 else "SHORT"
-        take = sig.proba >= config.PROBA_FLOOR
-        log.info("signal %s [%s] %s | proba=%.3f r_hat=%.2f | %s", stamp,
-                 s.name, side_txt, sig.proba, sig.r_hat,
-                 "TAKE" if take else f"skip (<{config.PROBA_FLOOR})")
-        if take:
-            candidates.append((s, sig))
+    if fired:
+        emb = strat.embed_context(bars, len(bars) - 1)   # one Chronos pass per bar
+        for s, sig in fired:
+            sig.proba, sig.r_hat = s.grade(bars, sig, emb=emb)
+            side_txt = "LONG" if sig.direction > 0 else "SHORT"
+            take = sig.proba >= config.PROBA_FLOOR
+            log.info("signal %s [%s] %s | proba=%.3f r_hat=%.2f | %s", stamp,
+                     s.name, side_txt, sig.proba, sig.r_hat,
+                     "TAKE" if take else f"skip (<{config.PROBA_FLOOR})")
+            if take:
+                candidates.append((s, sig))
 
     if not candidates:
         return None

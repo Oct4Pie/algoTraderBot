@@ -7,7 +7,7 @@
         if sig: proba, r_hat = s.grade(bars, sig)
 """
 import config
-from strategies.base import Signal, Strategy
+from strategies.base import Signal, Strategy, embed_context
 from strategies.bos import BosStrategy
 from strategies.ema_cross import EmaCrossStrategy
 from strategies.keltner import KeltnerAdxStrategy
@@ -20,8 +20,9 @@ REGISTRY = {
     BosStrategy.name: BosStrategy,
 }
 
-__all__ = ["Signal", "Strategy", "SuperTrendStrategy", "EmaCrossStrategy",
-           "KeltnerAdxStrategy", "BosStrategy", "REGISTRY", "make_strategies"]
+__all__ = ["Signal", "Strategy", "embed_context", "SuperTrendStrategy",
+           "EmaCrossStrategy", "KeltnerAdxStrategy", "BosStrategy",
+           "REGISTRY", "make_strategies"]
 
 
 def make_strategies(active=None):
