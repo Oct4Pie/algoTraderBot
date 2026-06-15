@@ -16,10 +16,12 @@ A live TopstepX bot that trades **mechanical entries graded by AI**, with a
 - **Python 3.10+** and **git** (dependencies install the public
   [`futures_foundation`](https://github.com/johnamcruz/Futures-Foundation-Model)
   library from GitHub).
-- **Internet on first run** — downloads the ~45 MB `amazon/chronos-bolt-tiny`
-  checkpoint once, then runs offline.
-- A **TopstepX account + API key** — only for live trading. Backtesting needs
-  neither.
+- **Internet** — downloads the ~45 MB `amazon/chronos-bolt-tiny` checkpoint on
+  first run, and the bot reads contract specs from the broker API at startup.
+- A **TopstepX account + API key** — required for **both live and backtest**.
+  Tick size / tick value come from the broker API (`/Contract/search`); there is
+  no offline mode. Backtests still use **local CSV bars** — only the contract
+  specs come from the API.
 
 ### 2. Install
 
@@ -30,21 +32,11 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Verify the install** with a short backtest — no credentials needed. The first
-run downloads the Chronos checkpoint, so give it a minute:
-
-```bash
-python bot.py --backtest --symbol NQ --start 2026-05-23 --end 2026-05-25
-```
-
-You should see candles/signals scroll past and a `BACKTEST NQ | trades=… win=…`
-summary at the end. If you get that, you're ready.
-
 > **macOS note:** if you hit a segfault (the torch/xgboost OpenMP clash), prefix
 > commands with `KMP_DUPLICATE_LIB_OK=TRUE`, e.g.
 > `KMP_DUPLICATE_LIB_OK=TRUE python bot.py …`.
 
-### 3. Add your credentials (`.env`) — live trading only
+### 3. Add your credentials (`.env`)
 
 Credentials live in a **gitignored `.env`** file. Copy the template:
 
@@ -67,6 +59,16 @@ TOPSTEPX_ACCOUNT=                 # blank = first tradable account, or an id/nam
   a specific one (do this to be sure it's your practice account).
 - Real environment variables (`export TOPSTEPX_API_KEY=…`) override `.env` if
   set — handy for CI or secrets managers.
+
+**Verify the install** with a short backtest (uses your creds for the contract
+spec; the first run also downloads the Chronos checkpoint, so give it a minute):
+
+```bash
+python bot.py --backtest --symbol NQ --start 2026-05-23 --end 2026-05-25
+```
+
+You should see candles/signals scroll past and a `BACKTEST NQ | trades=… win=…`
+summary at the end. If you get that, you're ready.
 
 ### 4. Run (live)
 
@@ -103,25 +105,30 @@ each trade risks roughly the same dollars:
 contracts = min(MAX_CONTRACTS, max(1, floor(risk_$ / (stop_ticks × tick_value))))
 ```
 
-`tick_value` comes from `config.POINT_VALUES` (e.g. NQ = $20/pt × 0.25 tick =
-$5/tick). A tighter stop ⇒ more contracts, a wider stop ⇒ fewer — so dollar risk
-stays roughly constant, which pairs naturally with the 0.5×ATR stop.
+`tick_value` is read from the broker contract (`/Contract/search` → `tickValue`,
+e.g. NQ ≈ $5/tick, MNQ ≈ $0.50/tick). A tighter stop ⇒ more contracts, a wider
+stop ⇒ fewer — so dollar risk stays roughly constant, which pairs naturally with
+the 0.5×ATR stop. **Micros** (MNQ, MES, MGC, M2K, MYM) just work — same models
+and bars as their parent, sized at the micro's smaller `tickValue`.
 
-### 5. Backtest (no API, no credentials)
+### 5. Backtest (local bars, live specs)
 
 Backtesting runs the **exact live logic** — same strategies, grading, and PPO
 trailing exit — over a local CSV, with a simulated broker filling
-entries/stops/trailing against history.
+entries/stops/trailing against history. Contract specs (tick size / value) are
+still looked up from the broker API, so credentials are required.
 
 ```bash
 # one month of NQ
 python bot.py --backtest --symbol NQ --start 2026-05-01 --end 2026-06-01
 
-# a different ticker, full file, with risk sizing
+# a micro and a different ticker
+python bot.py --backtest --symbol MNQ --start 2026-05-01 --end 2026-06-01
 python bot.py --backtest --symbol ES --risk 500
 ```
 
-- `--symbol` reads `data/<symbol>_3min.csv` (ships with NQ, ES, RTY, YM, GC).
+- `--symbol` reads `data/<symbol>_3min.csv` (ships with NQ, ES, RTY, YM, GC);
+  **micros use their parent's bars** (MNQ → NQ) at the micro's tick value.
 - `--start` / `--end` are `YYYY-MM-DD` (**start inclusive, end exclusive**); omit
   either to run from the warmup point / to the end of the file.
 - `--size`, `--risk`, `--proba-floor` and the `config.py` knobs all apply, so you
@@ -231,4 +238,7 @@ table is the source of truth for current performance.
 - **Exit mode**: default `USE_TRAILING_STOP = False` is the PPO-driven reprice
   (what it's trained for). `True` uses the ProjectX native trailing bracket
   (`type 5`); the PPO can only *tighten* that, so it mostly sits idle.
-- **Internet** needed once for the Chronos checkpoint; offline after.
+- **Online only**: the broker API is the single source of truth for contract
+  specs (tick size / value) — there is no hard-coded fallback, so the bot needs
+  credentials + connectivity at startup for both live and backtest. (The Chronos
+  checkpoint itself is cached after the first download.)

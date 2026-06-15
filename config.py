@@ -29,13 +29,23 @@ SYMBOL = "NQ"
 TIMEFRAME_MIN = 3
 SIZE = 1
 
-# Tick sizes for backtesting (live mode reads tickSize from the broker).
-TICK_SIZES = {"NQ": 0.25, "ES": 0.25, "RTY": 0.1, "YM": 1.0,
-              "GC": 0.1, "SI": 0.005, "CL": 0.01}
-# Dollar value of a 1.00-point move, per contract (tick_value = tick_size × this).
-POINT_VALUES = {"NQ": 20, "ES": 50, "RTY": 50, "YM": 5,
-                "GC": 100, "SI": 5000, "CL": 1000}
-# Tickers the shipped entry models were trained on (others are out of distribution).
+# Micro contracts trade the SAME bars as their full-size parent (so the models
+# apply directly) at 1/10 the point value. Map each micro → its parent.
+MICRO_PARENT = {"MNQ": "NQ", "MES": "ES", "M2K": "RTY", "MYM": "YM",
+                "MGC": "GC", "MCL": "CL"}
+
+
+def base_symbol(symbol: str) -> str:
+    """The full-size parent for a micro (MNQ→NQ), else the symbol itself. Used
+    for model feature derivation and choosing the data/<sym>_3min.csv file."""
+    return MICRO_PARENT.get(symbol, symbol)
+
+
+# Tick size and tick value are NOT hard-coded — they come from the broker API
+# (/Contract/search → tickSize, tickValue) for both live and backtests.
+
+# Full-size tickers the shipped entry models were trained on. Micros map to these
+# via base_symbol(), so they're in-distribution too.
 TRAINED_SYMBOLS = ("NQ", "ES", "RTY", "YM", "GC")
 
 # Position sizing — use either a fixed SIZE or RISK_PER_TRADE (not both).

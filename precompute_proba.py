@@ -39,7 +39,8 @@ def _ffm_matrix(df: pd.DataFrame) -> np.ndarray:
     from futures_foundation.features import derive_features
 
     feats = derive_features(df.rename(columns={"datetime": "datetime"}),
-                            instrument=config.SYMBOL, atr_period=config.ATR_P)
+                            instrument=config.base_symbol(config.SYMBOL),
+                            atr_period=config.ATR_P)
     out = np.full((len(df), len(_FFM_COLS)), np.nan, dtype=np.float32)
     for k, name in enumerate(_FFM_COLS):
         if name in feats.columns:       # coerce nullable/NA → NaN

@@ -25,6 +25,16 @@ SIDE = {"BUY": 0, "SELL": 1}
 UNIT_MINUTE = 2
 
 
+def fetch_contract_specs(username: str, api_key: str, symbol: str,
+                         live: bool = False):
+    """Authenticate and look up (tick_size, tick_value) for `symbol` from the
+    broker. Used by the backtester so contract specs come from the API, not a
+    hard-coded table."""
+    cl = TopstepXClient(username, api_key)
+    cl.authenticate()
+    return cl.get_contract_specs(symbol, live)
+
+
 class TopstepXClient:
     """Thin REST wrapper around the TopstepX / ProjectX Gateway API."""
 
@@ -59,15 +69,27 @@ class TopstepXClient:
                 return a
         raise RuntimeError(f"account {selector!r} not found among tradable accounts")
 
-    def get_active_contract(self, symbol: str) -> dict:
+    def search_contracts(self, search_text: str, live: bool = False) -> list:
+        # /Contract/search — returns up to 20 matching contracts, each with
+        # tickSize, tickValue, activeContract, etc.
+        r = self._post("/Contract/search",
+                       {"searchText": search_text, "live": live})
+        return r.get("contracts", [])
+
+    def get_active_contract(self, symbol: str, live: bool = False) -> dict:
         # Contract names look like '<symbol><monthcode><yeardigit>' (e.g.
         # 'NQM6'), so the base symbol is name[:-2]. Letting the broker pick
-        # the active month handles contract rolls for free.
-        r = self._post("/Contract/available", {"live": False})
-        for c in r.get("contracts", []):
+        # the active month handles contract rolls for free. The returned object
+        # carries the authoritative tickSize / tickValue.
+        for c in self.search_contracts(symbol, live):
             if c.get("activeContract") and c.get("name", "")[:-2] == symbol:
                 return c
         raise RuntimeError(f"no active contract found for {symbol!r}")
+
+    def get_contract_specs(self, symbol: str, live: bool = False):
+        """(tick_size, tick_value) for the active contract, from the broker."""
+        c = self.get_active_contract(symbol, live)
+        return float(c["tickSize"]), float(c["tickValue"])
 
     def get_bars(self, contract_id: str, minutes: int, limit: int = 300) -> pd.DataFrame:
         now = dt.datetime.now(dt.timezone.utc)

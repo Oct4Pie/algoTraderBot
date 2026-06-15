@@ -163,10 +163,9 @@ def run():
     client.authenticate()
     acct = client.pick_account(config.ACCOUNT)
     contract = client.get_active_contract(config.SYMBOL)
+    # tick size / value come straight from the broker contract — never hardcoded.
     tick_size = float(contract["tickSize"])
-    point_value = config.POINT_VALUES.get(config.SYMBOL)
-    tick_value = float(contract.get("tickValue")
-                       or (tick_size * point_value if point_value else 0.0))
+    tick_value = float(contract["tickValue"])
     ctx = BotContext(client, acct["id"], contract["id"], tick_size, tick_value)
     names = "+".join(s.name for s in ctx.strategies)
     log.info("✅ %s | %s | %d-min | [%s] | conf≥%.2f | exit: %s | size: %s",

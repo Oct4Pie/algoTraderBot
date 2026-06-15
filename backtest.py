@@ -65,19 +65,34 @@ def _summary(trades, symbol):
     log.info("trades written → %s", os.path.relpath(out, config.HERE))
 
 
+def _resolve_specs(symbol):
+    """(tick_size, tick_value) for a backtest — always from the broker API
+    (/Contract/search). The API is the single source of truth; there is no
+    offline fallback, so credentials are required even for backtests (only the
+    bars are mock)."""
+    if not (config.TOPSTEPX_USERNAME and config.TOPSTEPX_API_KEY):
+        raise SystemExit("contract specs come from the broker API — set "
+                         "TOPSTEPX_USERNAME / TOPSTEPX_API_KEY in .env")
+    import broker
+    ts, tv = broker.fetch_contract_specs(
+        config.TOPSTEPX_USERNAME, config.TOPSTEPX_API_KEY, symbol)
+    log.info("contract specs (API): %s tick=%g tickValue=$%g", symbol, ts, tv)
+    return ts, tv
+
+
 def run_backtest(symbol="NQ", start=None, end=None):
     import bot     # imported here to avoid a cycle (bot imports backtest lazily)
 
-    tick = config.TICK_SIZES.get(symbol)
-    if tick is None:
-        raise SystemExit(f"no tick size for {symbol} — add it to config.TICK_SIZES")
-    if symbol not in config.TRAINED_SYMBOLS:
+    if config.base_symbol(symbol) not in config.TRAINED_SYMBOLS:
         log.warning("⚠️  models are trained on %s; %s is out of distribution",
                     "/".join(config.TRAINED_SYMBOLS), symbol)
 
-    point_value = config.POINT_VALUES.get(symbol)
-    tick_value = tick * point_value if point_value else 0.0
-    df = _load(symbol, end)
+    # Micros trade their parent's bars; set SYMBOL so feature derivation uses the
+    # parent instrument, and load the parent's data file.
+    config.SYMBOL = symbol
+    base = config.base_symbol(symbol)
+    tick, tick_value = _resolve_specs(symbol)
+    df = _load(base, end)
     sim = SimBroker(df, tick)
     ctx = bot.BotContext(sim, account_id=0, contract_id=symbol, tick_size=tick,
                          tick_value=tick_value, log_candles=False)

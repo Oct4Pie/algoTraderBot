@@ -55,7 +55,9 @@ def ffm_block(bars: pd.DataFrame, i: int) -> np.ndarray:
     from futures_foundation.features import derive_features
 
     df = bars.rename(columns={"time": "datetime"})
-    feats = derive_features(df, instrument=config.SYMBOL, atr_period=config.ATR_P)
+    # micros (MNQ…) derive features under their parent instrument (NQ…)
+    feats = derive_features(df, instrument=config.base_symbol(config.SYMBOL),
+                            atr_period=config.ATR_P)
     row = feats.iloc[i]
     cols = feats.columns
     out = np.full(len(FFM_COLS), np.nan, dtype=np.float32)
