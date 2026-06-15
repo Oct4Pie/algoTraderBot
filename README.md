@@ -1,4 +1,4 @@
-# algoTraderBot — multi-strategy AI futures bot (NQ 3-min, TopstepX)
+# algoTraderBot — multi-strategy AI futures bot (3-min, TopstepX)
 
 A live TopstepX bot that trades **mechanical entries graded by AI**, with a
 **reinforcement-learned trailing exit**. Each strategy is a thin signal
@@ -12,8 +12,13 @@ each bar ─► every active strategy detects its entry (SuperTrend flip / EMA c
         ─► PPO policy trails the stop bar-by-bar until exit
 ```
 
+Runs on the supported 3-min futures (`NQ`, `ES`, `RTY`, `YM`, `GC`, `SI`, `CL`).
+The framework — strategies, sizing, and the trailing exit — is ticker-agnostic;
+the shipped **entry models are trained on NQ**, so other tickers run out of
+distribution until retrained on their own data.
+
 > ⚠️ **Educational — places LIVE orders.** Run it on a practice/evaluation
-> account first. NQ 3-min only (the models' training scope).
+> account first. 3-min bars; entry models currently trained on NQ.
 
 ## Architecture
 
@@ -206,8 +211,9 @@ The printed holdout table is the source of truth for current performance.
 
 ## Caveats
 
-- **Scope**: NQ 3-min UTC bars only — other tickers/timeframes are out of
-  distribution.
+- **Scope**: the bot runs on any supported 3-min ticker, but the entry models
+  are trained on NQ 3-min UTC bars — other tickers/timeframes are out of
+  distribution until retrained on their own data.
 - **Feature fidelity**: 68 of the 76 FFM features are computed live; the 8
   session/time columns the current library doesn't emit are left NaN (XGBoost
   handles missing natively). The grade is faithful but not bit-identical to
