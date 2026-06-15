@@ -52,9 +52,10 @@ class Signal:
 def embed_context(bars: pd.DataFrame, i: int) -> np.ndarray:
     """Chronos context embedding (1, 256) for the window ending at bar i. All
     strategies firing on the same bar share this same context, so it is computed
-    once per bar (one Chronos subprocess pass) and reused across strategies."""
-    from futures_foundation import foundation
-    return foundation.embed_bars(bars["close"].to_numpy(float), [i], ctx=config.CTX)
+    once per bar and reused across strategies. Routed through the warm embedding
+    worker (model loaded once per session)."""
+    import embedder
+    return embedder.embed_bars(bars["close"].to_numpy(float), [i], ctx=config.CTX)
 
 
 def ffm_block(bars: pd.DataFrame, i: int) -> np.ndarray:

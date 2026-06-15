@@ -200,6 +200,7 @@ Small, single-responsibility modules:
 | `sim_broker.py` | `SimBroker` (an `OrderRouter`) — fills/stops/trailing against a CSV for backtests |
 | `backtest.py` | drives `handle_bar` over history with date-range selection |
 | `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings |
+| `embedder.py` / `embed_worker.py` | warm Chronos embedding worker — model loaded once per session |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
 | `exit_manager.py` | PPO trailing-stop management for an open position |
 | `logsetup.py` | logging to `log/bot.log` |
@@ -221,6 +222,12 @@ The bot depends only on the public **`futures_foundation`** library (Chronos
 embedding + the model head classes + indicator primitives) — no proprietary
 code. The joblib bundles run **inference directly**; the FFM feature block is
 computed live via `futures_foundation.features.derive_features`.
+
+**Embeddings stay warm.** Chronos runs in a persistent subprocess
+(`embed_worker.py`) that loads the model **once per session** — torch isolated
+from xgboost, model never reloaded. A grade drops from ~3–4 s (cold reload each
+call) to ~0.03 s, so backtests/retrains run in minutes and live signal bars are
+near-instant. Falls back to the one-shot library path if the worker can't start.
 
 **Adding a strategy** = one new file in `strategies/` implementing `_fired()` /
 `_hand_features()`, plus its joblib model in `models/`, then register it in
