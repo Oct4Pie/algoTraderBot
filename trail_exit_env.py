@@ -21,7 +21,7 @@ import numpy as np
 
 # Reuse the exact indicators the live bot trades on.
 import indicators as ind
-from config import ST_PERIOD, ST_MULT
+from config import ST_PERIOD, ST_MULT, STOP_ATR, ATR_P
 
 # ── trade / agent constants ────────────────────────────────────────────
 MAX_HOLD = 80          # force-exit after this many bars (80 * 3min = 4h)
@@ -39,14 +39,20 @@ N_ACTIONS = len(TRAIL_MULTS)
 # ── data prep ──────────────────────────────────────────────────────────
 
 def build_arrays(df, period: int = ST_PERIOD, mult: float = ST_MULT):
-    """From an OHLC frame, precompute every per-bar array the sim needs."""
+    """From an OHLC frame, precompute every per-bar array the sim needs.
+
+    `atr` (period ATR_PERIOD) drives the trail distance; `atr_stop` (period
+    ATR_P) sets the initial stop = STOP_ATR × atr_stop — the same 0.5×ATR(20)
+    risk the live strategies enter with."""
     line, direction = ind.supertrend(df, period, mult)
     atr = np.asarray(ind.atr(df, ATR_PERIOD), dtype=np.float64)
+    atr_stop = np.asarray(ind.atr(df, ATR_P), dtype=np.float64)
     return {
         "close": df["close"].to_numpy(dtype=np.float64),
         "high": df["high"].to_numpy(dtype=np.float64),
         "low": df["low"].to_numpy(dtype=np.float64),
         "atr": atr,
+        "atr_stop": atr_stop,
         "line": np.asarray(line, dtype=np.float64),
         "direction": np.asarray(direction, dtype=np.float64),
     }
@@ -57,20 +63,19 @@ def build_catalog(arr, warmup: int = 150):
     of (entry_idx, sign) where sign = +1 long / -1 short.
 
     Entry/stop/risk mirror the live bot: enter at the flip bar's close, initial
-    stop at the SuperTrend line, risk = |entry - stop|. Flips with a
-    wrong-side or zero-risk stop are dropped (the live bot skips them too).
+    stop = STOP_ATR × ATR(ATR_P) (the live 0.5×ATR risk). Flips with no valid
+    ATR are dropped.
     """
-    close, line, direction, atr = (arr["close"], arr["line"],
-                                   arr["direction"], arr["atr"])
-    n = len(close)
+    direction, atr, atr_stop = arr["direction"], arr["atr"], arr["atr_stop"]
+    n = len(arr["close"])
     rows = []
     for i in range(warmup, n - 2):
         if direction[i] == direction[i - 1]:
             continue                                  # no flip
-        sign = 1 if direction[i] == 1 else -1
-        risk = (close[i] - line[i]) * sign            # entry - stop, favorable
-        if risk <= 0 or not np.isfinite(atr[i]) or atr[i] <= 0:
+        if not (np.isfinite(atr[i]) and atr[i] > 0
+                and np.isfinite(atr_stop[i]) and atr_stop[i] > 0):
             continue
+        sign = 1 if direction[i] == 1 else -1
         rows.append((i, sign))
     return np.asarray(rows, dtype=np.int64)
 
@@ -88,6 +93,7 @@ class TrailExitSim:
         self.high = arr["high"]
         self.low = arr["low"]
         self.atr = arr["atr"]
+        self.atr_stop = arr["atr_stop"]
         self.line = arr["line"]
         self.n = len(self.close)
 
@@ -96,8 +102,9 @@ class TrailExitSim:
         self.entry_idx = int(entry_idx)
         self.i = int(entry_idx)                # last *observed* bar
         self.entry = float(self.close[entry_idx])
-        self.stop = float(self.line[entry_idx])   # initial protective stop
-        self.risk = (self.entry - self.stop) * self.sign
+        # initial stop = STOP_ATR × ATR(ATR_P) — same 0.5×ATR(20) risk as live
+        self.risk = STOP_ATR * float(self.atr_stop[entry_idx])
+        self.stop = self.entry - self.sign * self.risk
         self.bars_held = 0
         self.mfe = 0.0
         self.prev_value = 0.0

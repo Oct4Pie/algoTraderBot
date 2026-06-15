@@ -54,15 +54,16 @@ def eval_policy(arr, catalog, choose):
 
 
 def eval_fixed_2r(arr, catalog, rr=2.0):
-    """Baseline = the bot's current exit: stop at the SuperTrend line, fixed
+    """Baseline = a fixed exit on the same 0.5×ATR risk: stop at STOP_ATR×ATR(ATR_P),
     take-profit at `rr` R, whichever the bar hits first."""
+    from config import STOP_ATR
     close, high, low = arr["close"], arr["high"], arr["low"]
-    line, n = arr["line"], len(arr["close"])
+    atr_stop, n = arr["atr_stop"], len(arr["close"])
     rs = []
     for entry_idx, sign in catalog:
         entry = close[entry_idx]
-        stop = line[entry_idx]
-        risk = (entry - stop) * sign
+        risk = STOP_ATR * atr_stop[entry_idx]
+        stop = entry - sign * risk
         target = entry + sign * rr * risk
         realized = None
         for k in range(1, MAX_HOLD + 1):
