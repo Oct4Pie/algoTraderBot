@@ -107,7 +107,8 @@ live trading — backtesting works without them.)
 ```python
 ACTIVE_STRATEGIES = ["supertrend", "ema"]   # one name, or both (highest proba wins)
 PROBA_FLOOR       = 0.35                     # only take signals graded ≥ this
-GIVEBACK_R        = 0.75                     # stop never sits > this R below the peak
+ACTIVATE_R        = 2.0                      # hold initial 1R stop until +2R, then trail
+GIVEBACK_R        = 0.75                     # once trailing, give back ≤ this R from peak
 USE_PPO_EXIT      = True                     # False → fixed-RR bracket instead
 USE_TRAILING_STOP = False                    # False → PPO reprices the stop each bar
                                              #         (policy-driven, the default);
@@ -135,12 +136,13 @@ and every trailing-stop move are logged via `log.info` to both the console and
 - **Exit** — each bar the PPO policy (`models/rl_trail_exit/`) reads the open
   trade (unrealized R, MFE, ATR, momentum, distance from the strategy's reference
   line), computes a trailing-stop level, and **reprices the live stop to it via
-  `/Order/modify`** (ratcheting only in your favor). A hard **give-back cap**
-  (`GIVEBACK_R`, default 0.75) sits on top: the stop is never allowed more than
-  0.75R below the running peak, so you give back at most 0.75R from the best
-  point (and the worst-case loss is 0.75R too). The PPO may trail tighter, never
-  looser. It's trained on the same 0.5×ATR(20) risk and the same cap. If no
-  policy is present it falls back to a fixed `RR` bracket. The policy
+  `/Order/modify`** (ratcheting only in your favor). The trail is shaped by two
+  knobs: **`ACTIVATE_R`** (hold the initial 1R stop until the peak reaches +2R,
+  so winners survive early pullbacks) and **`GIVEBACK_R`** (once trailing, the
+  stop never sits more than 0.75R below the running peak). So a trade risks 1R,
+  and once it's up +2R it locks in ≥ +1.25R and rides, giving back ≤ 0.75R from
+  the best point. It's trained on the same 0.5×ATR(20) risk and the same shaping.
+  If no policy is present it falls back to a fixed `RR` bracket. The policy
   forward-pass is pure numpy, so the bot never loads torch/SB3 next to xgboost.
 
 ## Backtest (no API, no credentials)

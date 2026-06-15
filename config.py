@@ -71,7 +71,13 @@ USE_TRAILING_STOP = False
 POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
 RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)
 
-# Give-back cap: the stop is never allowed to sit more than this many R below the
-# running peak (max favorable excursion). The PPO may trail tighter, never looser
-# — so from a +5R peak you exit at ≥ +4.25R, and the worst case loss is this too.
+# Trailing exit shape:
+#   ACTIVATE_R — hold the initial stop (1R = STOP_ATR×ATR) until the trade's peak
+#                reaches this many R; only then start trailing. Lets winners run
+#                through early pullbacks before we protect.
+#   GIVEBACK_R — once trailing, the stop never sits more than this many R below the
+#                running peak (the PPO may trail tighter, never looser).
+# e.g. ACTIVATE_R=2, GIVEBACK_R=0.75: risk 1R until +2R, then lock in ≥ +1.25R and
+# ride, giving back at most 0.75R from the best point.
+ACTIVATE_R = 2.0
 GIVEBACK_R = 0.75

@@ -66,7 +66,15 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
     cur = float(bars["close"].iloc[-1])
     stamp = bars["time"].iloc[-1].strftime("%H:%M")
 
-    mult = policy.trail_mult(exit_obs(tee, st, bars, line))   # updates st["mfe"]
+    obs = exit_obs(tee, st, bars, line)                       # updates st["mfe"]
+
+    # Hold the initial stop until the trade's peak reaches ACTIVATE_R.
+    if st["mfe"] < config.ACTIVATE_R:
+        log.info("   %s  armed — peak %.2fR < %.1fR, holding initial stop",
+                 stamp, st["mfe"], config.ACTIVATE_R)
+        return
+
+    mult = policy.trail_mult(obs)
     trail_dist = mult * a                                     # price distance
     # give-back cap: never let the stop sit > GIVEBACK_R below the running peak
     giveback = config.GIVEBACK_R * st["risk"]
