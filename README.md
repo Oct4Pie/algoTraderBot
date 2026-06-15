@@ -193,8 +193,9 @@ Small, single-responsibility modules:
 |---|---|
 | `bot.py` | entry point — `handle_bar` (detect → grade → enter → trail) + live loop + CLI |
 | `config.py` | **all settings**: strategies, sizing, exit shaping, strategy params |
-| `broker.py` | `TopstepXClient` — REST wrapper over the ProjectX Gateway API (incl. `/Contract/search` for specs) |
-| `sim_broker.py` | `SimBroker` — fills/stops/trailing against a CSV for backtests |
+| `broker_base.py` | `BrokerClient` / `OrderRouter` — the broker **interface** |
+| `broker.py` | `TopstepXClient` (a `BrokerClient`) over the ProjectX Gateway API + `make_broker()` |
+| `sim_broker.py` | `SimBroker` (an `OrderRouter`) — fills/stops/trailing against a CSV for backtests |
 | `backtest.py` | drives `handle_bar` over history with date-range selection |
 | `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
@@ -223,6 +224,11 @@ computed live via `futures_foundation.features.derive_features`.
 `_hand_features()`, plus its joblib model in `models/`, then register it in
 `strategies/__init__.py`. The strategy-agnostic exit applies automatically — no
 exit work per strategy. Four ship today (`supertrend`, `ema`, `keltner`, `bos`).
+
+**Adding a broker** = implement `BrokerClient` (`broker_base.py`) in a new module
+and add a case to `broker.make_broker()` + `config.BROKER`. The bar loop, sizing,
+and exit all go through that interface, so nothing else changes — e.g. a Rithmic
+client would just provide the same account / market-data / order methods.
 
 ## Retrain the trailing exit (optional)
 

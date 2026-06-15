@@ -25,7 +25,7 @@ import time
 import config
 import exit_manager as ex
 import strategies as strat
-from broker import SIDE, TopstepXClient
+from broker import SIDE, make_broker
 from logsetup import get_logger
 
 log = get_logger()
@@ -158,8 +158,8 @@ def handle_bar(ctx: BotContext, bars, trade_state):
 
 
 def run():
-    """Live trading loop against the real TopstepX broker."""
-    client = TopstepXClient(config.TOPSTEPX_USERNAME, config.TOPSTEPX_API_KEY)
+    """Live trading loop against the configured broker."""
+    client = make_broker()
     client.authenticate()
     acct = client.pick_account(config.ACCOUNT)
     contract = client.get_active_contract(config.SYMBOL)

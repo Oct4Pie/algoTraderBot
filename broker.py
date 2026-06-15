@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""broker.py — TopstepX / ProjectX Gateway REST client.
+"""broker.py — TopstepX / ProjectX Gateway broker (implements BrokerClient).
 
-A thin wrapper around the order/position/market-data endpoints the bot uses.
-Extracted so the strategy and exit logic stay broker-agnostic.
+The bot talks to brokers only through the `broker_base.BrokerClient` interface,
+so the strategy / exit / bar-loop code is broker-agnostic. To add a broker
+(e.g. Rithmic), implement `BrokerClient` in its own module and add a case to
+`make_broker()`.
 """
 import datetime as dt
 from typing import Optional
@@ -10,9 +12,10 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from broker_base import POSITION_LONG, SIDE, BrokerClient   # re-exported below
 from config import API_BASE
 
-# ── ProjectX enums ─────────────────────────────────────────────────────
+# ── ProjectX-specific enums (internal to this broker) ──────────────────
 ORDER_TYPE_MARKET = 2
 ORDER_TYPE_STOP = 4
 ORDER_TYPE_TRAILING_STOP = 5
@@ -20,23 +23,32 @@ BRACKET_TYPE_STOP = 4
 BRACKET_TYPE_TRAIL = 5
 BRACKET_TYPE_LIMIT = 1
 ORDER_STATUS_WORKING = 1
-POSITION_LONG = 1
-SIDE = {"BUY": 0, "SELL": 1}
 UNIT_MINUTE = 2
 
+__all__ = ["TopstepXClient", "make_broker", "fetch_contract_specs",
+           "SIDE", "POSITION_LONG"]
 
-def fetch_contract_specs(username: str, api_key: str, symbol: str,
-                         live: bool = False):
-    """Authenticate and look up (tick_size, tick_value) for `symbol` from the
-    broker. Used by the backtester so contract specs come from the API, not a
+
+def make_broker() -> BrokerClient:
+    """Construct the broker selected by config.BROKER. Add a case here to wire
+    up a new broker implementation."""
+    import config
+    if config.BROKER == "topstepx":
+        return TopstepXClient(config.TOPSTEPX_USERNAME, config.TOPSTEPX_API_KEY)
+    raise SystemExit(f"unknown broker {config.BROKER!r} (config.BROKER)")
+
+
+def fetch_contract_specs(symbol: str, live: bool = False):
+    """(tick_size, tick_value) for `symbol` from the configured broker API.
+    Used by the backtester so contract specs come from the broker, not a
     hard-coded table."""
-    cl = TopstepXClient(username, api_key)
-    cl.authenticate()
-    return cl.get_contract_specs(symbol, live)
+    b = make_broker()
+    b.authenticate()
+    return b.get_contract_specs(symbol, live)
 
 
-class TopstepXClient:
-    """Thin REST wrapper around the TopstepX / ProjectX Gateway API."""
+class TopstepXClient(BrokerClient):
+    """TopstepX / ProjectX Gateway REST broker — a `BrokerClient`."""
 
     def __init__(self, username: str, api_key: str, base: str = API_BASE):
         self.base = base

@@ -23,6 +23,9 @@ TOPSTEPX_USERNAME = os.environ.get("TOPSTEPX_USERNAME", "")
 TOPSTEPX_API_KEY  = os.environ.get("TOPSTEPX_API_KEY", "")
 ACCOUNT = os.environ.get("TOPSTEPX_ACCOUNT", "")   # "" = first tradable account
 
+# ── broker ─────────────────────────────────────────────────────────────
+BROKER = "topstepx"        # which BrokerClient to use (see broker.make_broker)
+
 # ── market / sizing ────────────────────────────────────────────────────
 API_BASE = "https://api.topstepx.com/api"
 SYMBOL = "NQ"

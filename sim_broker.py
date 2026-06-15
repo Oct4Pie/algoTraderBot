@@ -15,7 +15,7 @@ assumed first. Open positions at end-of-data are closed at the last close.
 """
 from dataclasses import dataclass
 
-from broker import SIDE
+from broker_base import SIDE, OrderRouter
 
 
 @dataclass
@@ -33,8 +33,8 @@ class Trade:
     reason: str             # "stop" | "target" | "eod"
 
 
-class SimBroker:
-    """Drop-in stand-in for TopstepXClient over a bars DataFrame."""
+class SimBroker(OrderRouter):
+    """An OrderRouter that fills against a bars DataFrame — the backtest broker."""
 
     def __init__(self, df, tick_size: float):
         self.df = df.reset_index(drop=True)

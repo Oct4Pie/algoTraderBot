@@ -74,8 +74,7 @@ def _resolve_specs(symbol):
         raise SystemExit("contract specs come from the broker API — set "
                          "TOPSTEPX_USERNAME / TOPSTEPX_API_KEY in .env")
     import broker
-    ts, tv = broker.fetch_contract_specs(
-        config.TOPSTEPX_USERNAME, config.TOPSTEPX_API_KEY, symbol)
+    ts, tv = broker.fetch_contract_specs(symbol)
     log.info("contract specs (API): %s tick=%g tickValue=$%g", symbol, ts, tv)
     return ts, tv
 
