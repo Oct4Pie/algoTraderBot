@@ -33,9 +33,11 @@ def reconstruct_state(client, account_id, contract_id, pos, strategy) -> dict | 
             "bars_held": 0, "mfe": 0.0, "trail_ticks": None, "strategy": strategy}
 
 
-def exit_obs(tee, st: dict, bars: pd.DataFrame, line) -> np.ndarray:
+def exit_obs(tee, st: dict, bars: pd.DataFrame) -> np.ndarray:
     """Policy observation for the live open position — identical layout to
-    TrailExitSim._obs in trail_exit_env.py."""
+    TrailExitSim._obs in trail_exit_env.py. Strategy-agnostic: it's purely the
+    trade's R-state on the standard 0.5×ATR stop, so one policy fits every
+    strategy."""
     sign, entry, risk = st["sign"], st["entry"], st["risk"]
     a = float(ind.atr(bars, tee.ATR_PERIOD)[-1])
     cur = float(bars["close"].iloc[-1])
@@ -49,13 +51,12 @@ def exit_obs(tee, st: dict, bars: pd.DataFrame, line) -> np.ndarray:
         a / risk,                                 # volatility vs initial risk
         st["bars_held"] / tee.MAX_HOLD,           # time in trade
         sign * (cur - prev) / risk,               # recent momentum (R)
-        sign * (cur - float(line[-1])) / risk,    # distance from the reference line
     ], dtype=np.float32)
     return np.clip(obs, -tee.OBS_CLIP, tee.OBS_CLIP)
 
 
 def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
-                 bars, line, st: dict, trailing: bool):
+                 bars, st: dict, trailing: bool):
     """One bar of exit management: ask the policy how tight to trail, then push
     that to the broker. In `trailing` mode the order natively follows price and
     we only tighten its follow DISTANCE; otherwise we reprice a plain stop. Both
@@ -66,7 +67,7 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
     cur = float(bars["close"].iloc[-1])
     stamp = bars["time"].iloc[-1].strftime("%H:%M")
 
-    obs = exit_obs(tee, st, bars, line)                       # updates st["mfe"]
+    obs = exit_obs(tee, st, bars)                             # updates st["mfe"]
 
     # Hold the initial stop until the trade's peak reaches ACTIVATE_R.
     if st["mfe"] < config.ACTIVATE_R:

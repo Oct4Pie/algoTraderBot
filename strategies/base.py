@@ -97,11 +97,6 @@ class Strategy(ABC):
         entry for this strategy, else None."""
 
     @abstractmethod
-    def reference_line(self, bars: pd.DataFrame) -> np.ndarray:
-        """Per-bar reference line the PPO exit measures distance from
-        (SuperTrend line / slow EMA)."""
-
-    @abstractmethod
     def _hand_features(self, bars: pd.DataFrame, i: int, direction: int) -> np.ndarray:
         """The strategy's hand-crafted feature vector at bar i (FFM + handcrafts)."""
 

@@ -173,9 +173,11 @@ YM, GC) and generalize across them; the framework is ticker-agnostic.
   proba wins** (one position per contract). The trade enters at market with a
   protective stop at `0.5×ATR(20)` — exactly how the models scored the trade.
 - **Exit** — each bar the PPO policy (`models/rl_trail_exit/`) reads the open
-  trade (unrealized R, MFE, ATR, momentum, distance from the strategy's reference
-  line), computes a trailing-stop level, and **reprices the live stop to it via
-  `/Order/modify`** (ratcheting only in your favor). Two knobs shape it:
+  trade's R-state (unrealized R, MFE, stop distance, ATR/risk, time, momentum) —
+  **strategy-agnostic**, it never sees how the trade was entered, so one policy
+  fits every strategy on the standard 0.5×ATR(20) stop. It computes a
+  trailing-stop level and **reprices the live stop to it via `/Order/modify`**
+  (ratcheting only in your favor). Two knobs shape it:
   **`ACTIVATE_R`** (hold the initial 1R stop until the peak reaches +2R, so
   winners survive early pullbacks) and **`GIVEBACK_R`** (once trailing, the stop
   never sits more than 0.75R below the running peak). So a trade risks 1R, and
@@ -217,10 +219,10 @@ embedding + the model head classes + indicator primitives) — no proprietary
 code. The joblib bundles run **inference directly**; the FFM feature block is
 computed live via `futures_foundation.features.derive_features`.
 
-**Adding a strategy** = one new file in `strategies/` implementing `detect()` /
-`reference_line()` / `_hand_features()`, plus its joblib model in `models/`, then
-register it in `strategies/__init__.py`. Four ship today (`supertrend`, `ema`,
-`keltner`, `bos`).
+**Adding a strategy** = one new file in `strategies/` implementing `_fired()` /
+`_hand_features()`, plus its joblib model in `models/`, then register it in
+`strategies/__init__.py`. The strategy-agnostic exit applies automatically — no
+exit work per strategy. Four ship today (`supertrend`, `ema`, `keltner`, `bos`).
 
 ## Retrain the trailing exit (optional)
 
@@ -245,9 +247,9 @@ table is the source of truth for current performance.
 - **Feature fidelity**: 68 of 76 FFM features are computed live; the 8
   session/time columns the current library doesn't emit are left NaN (XGBoost
   handles missing natively) — faithful but not bit-identical to training.
-- **PPO exit scope**: the policy is trained on the live 0.5×ATR(20) stop but only
-  on **SuperTrend-flip** trades; it runs on every strategy live (EMA's
-  reference-line observation uses the slow EMA, slightly out of distribution).
+- **PPO exit**: one **strategy-agnostic** policy on the standard 0.5×ATR(20)
+  stop — it sees only the trade's R-state, so it applies identically to every
+  strategy. (SuperTrend flips are just the training catalog of NQ entry points.)
   With `GIVEBACK_R = 0.75` the give-back cap dominates, so the exit is
   effectively a deterministic "trail 0.75R from peak" — loosen it to let
   trend-riding matter more, tighten it for consistency.

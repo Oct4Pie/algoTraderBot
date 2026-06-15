@@ -22,10 +22,6 @@ class SuperTrendStrategy(Strategy):
             return None                              # no flip on the last bar
         return int(direction[-1])
 
-    def reference_line(self, bars):
-        line, _direction = ind.supertrend(bars, config.ST_PERIOD, config.ST_MULT)
-        return line
-
     def _hand_features(self, bars, i, direction):
         adx_i, adx_slope = adx_pair(bars, i)
         ffm = ffm_block(bars, i)

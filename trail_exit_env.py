@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""trail_exit_env.py — a PPO trailing-exit environment for the SuperTrend bot.
+"""trail_exit_env.py — a PPO trailing-exit environment (strategy-agnostic).
 
-The entry decision stays the SuperTrend flip (graded by the Chronos+XGBoost
-head in strategies/). What this module trains is the *exit*: instead of a fixed
-take-profit, a small PPO agent manages a trailing stop bar-by-bar.
+Trains the *exit*, not the entry: instead of a fixed take-profit, a small PPO
+agent manages a trailing stop bar-by-bar on the standard 0.5×ATR(20) stop every
+strategy enters with. The agent only ever sees the trade's R-state (unrealized
+R, MFE, stop distance, ATR/risk, time, momentum) — never how or why the trade
+was entered — so the SAME policy applies to every strategy (supertrend, ema,
+keltner, bos, …). SuperTrend flips are used only as a representative catalog of
+NQ entry points to train on.
 
 Pieces:
-    build_arrays(df)      precompute close/high/low/atr + SuperTrend line/dir
-    build_catalog(...)    every SuperTrend flip = one trainable "trade"
+    build_arrays(df)      precompute close/high/low + trail ATR + stop ATR
+    build_catalog(...)    every SuperTrend flip = one trainable "trade" sample
     TrailExitSim          pure-numpy simulator of a single trade (no gym dep)
     TrailingExitEnv       Gymnasium wrapper around the simulator (for SB3 PPO)
     NumpyMlpPolicy        torch-free loader for a trained policy (live inference)
@@ -27,7 +31,7 @@ from config import ST_PERIOD, ST_MULT, STOP_ATR, ATR_P, GIVEBACK_R, ACTIVATE_R
 MAX_HOLD = 80          # force-exit after this many bars (80 * 3min = 4h)
 ATR_PERIOD = ST_PERIOD  # ATR used for the trail (same period as SuperTrend)
 MOM_LOOKBACK = 3       # bars used for the momentum observation
-OBS_DIM = 7
+OBS_DIM = 6
 OBS_CLIP = 10.0
 
 # The agent's action = pick a trailing-stop distance in ATR multiples.
@@ -123,9 +127,9 @@ class TrailExitSim:
         bars_norm = self.bars_held / MAX_HOLD
         j = max(self.entry_idx, i - MOM_LOOKBACK)
         mom = s * (cur - self.close[j]) / self.risk
-        dist_st = s * (cur - self.line[i]) / self.risk
+        # strategy-agnostic: purely the trade's R-state on the 0.5×ATR stop
         obs = np.array([unreal, self.mfe, stop_dist, atr_R,
-                        bars_norm, mom, dist_st], dtype=np.float32)
+                        bars_norm, mom], dtype=np.float32)
         return np.clip(obs, -OBS_CLIP, OBS_CLIP)
 
     def step(self, action: int):

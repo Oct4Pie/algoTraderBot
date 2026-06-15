@@ -103,9 +103,8 @@ def handle_bar(ctx: BotContext, bars, trade_state):
             trade_state = ex.reconstruct_state(
                 c, ctx.account_id, ctx.contract_id, pos, ctx.strategies[0])
         if trade_state:
-            line = trade_state["strategy"].reference_line(bars)
             ex.manage_trail(ctx.tee, ctx.policy, c, ctx.account_id,
-                            ctx.contract_id, ctx.tick_size, bars, line,
+                            ctx.contract_id, ctx.tick_size, bars,
                             trade_state, ctx.trailing)
         return trade_state
 

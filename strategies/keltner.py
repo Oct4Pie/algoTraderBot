@@ -34,11 +34,6 @@ class KeltnerAdxStrategy(Strategy):
             return -1                                    # break below lower band
         return None
 
-    def reference_line(self, bars):
-        _up, mid, _lo = ind.keltner_channel(bars, config.KC_LEN, config.KC_MULT,
-                                            config.KC_ATR_P)
-        return mid                                       # channel centre (EMA)
-
     def _hand_features(self, bars, i, direction):
         c = bars["close"].to_numpy(float)
         _up, mid, _lo = ind.keltner_channel(bars, config.KC_LEN, config.KC_MULT,

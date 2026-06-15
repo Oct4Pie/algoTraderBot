@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""train_ppo_exit.py — train the PPO trailing-exit policy for the SuperTrend bot.
+"""train_ppo_exit.py — train the strategy-agnostic PPO trailing-exit policy.
 
     pip install -r requirements.txt
-    python train_ppo_exit.py                      # full train (~400k steps)
+    python train_ppo_exit.py                      # full train (~600k steps)
     python train_ppo_exit.py --quick              # fast smoke test
     python train_ppo_exit.py --timesteps 800000   # train harder
 
+The policy is standard across every strategy: it manages the same 0.5×ATR(20)
+stop from the trade's R-state alone, so one policy fits supertrend / ema /
+keltner / bos. SuperTrend flips are used only as a representative catalog of NQ
+entry points to train and benchmark on.
+
 Pipeline:
-    1. load NQ 3-min bars, precompute SuperTrend + ATR
-    2. catalog every flip as a trade, split train / holdout by time
+    1. load NQ 3-min bars, precompute the trail/stop ATR
+    2. catalog SuperTrend flips as trade samples, split train / holdout by time
     3. PPO learns a trailing-stop tightness policy on the train trades
     4. benchmark on the holdout vs fixed-2R and constant-trail baselines
     5. export the policy to ppo_trail_exit.npz (torch-free, for the live bot)

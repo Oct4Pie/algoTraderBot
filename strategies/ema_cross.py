@@ -34,9 +34,6 @@ class EmaCrossStrategy(Strategy):
             return -1                                    # fast crosses below slow
         return None
 
-    def reference_line(self, bars):
-        return ind.ema(bars["close"].to_numpy(float), config.EMA_SLOW)
-
     def _hand_features(self, bars, i, direction):
         c = bars["close"].to_numpy(float)
         ef = ind.ema(c, config.EMA_FAST)

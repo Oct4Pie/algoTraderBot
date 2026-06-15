@@ -32,11 +32,6 @@ class BosStrategy(Strategy):
             return -1
         return None
 
-    def reference_line(self, bars):
-        # BOS has no continuous line; use a slow EMA as the trend baseline the
-        # PPO exit measures extension from.
-        return ind.ema(bars["close"].to_numpy(float), config.EMA_SLOW)
-
     def _hand_features(self, bars, i, direction):
         c = bars["close"].to_numpy(float)
         sh, sl, shi, sli = ind.causal_swings(bars, config.SWING_K)
