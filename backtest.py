@@ -88,10 +88,11 @@ def run_backtest(symbol="NQ", start=None, end=None):
         start_idx = max(WINDOW, int(hits[0]) if len(hits) else len(df))
 
     names = "+".join(s.name for s in ctx.strategies)
-    log.info("▶ backtest %s [%s] | %s → %s | %d bars | exit: %s", symbol, names,
+    log.info("▶ backtest %s [%s] | %s → %s | %d bars | conf≥%.2f | exit: %s",
+             symbol, names,
              start or str(df["time"].iloc[start_idx].date()),
              end or str(df["time"].iloc[-1].date()),
-             len(df) - start_idx, ctx.exit_mode)
+             len(df) - start_idx, config.PROBA_FLOOR, ctx.exit_mode)
 
     trade_state = None
     for i in range(start_idx, len(df)):

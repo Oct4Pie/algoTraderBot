@@ -169,9 +169,9 @@ def run():
                        or (tick_size * point_value if point_value else 0.0))
     ctx = BotContext(client, acct["id"], contract["id"], tick_size, tick_value)
     names = "+".join(s.name for s in ctx.strategies)
-    log.info("✅ %s | %s | %d-min | [%s] | exit: %s | size: %s", acct["name"],
-             ctx.contract_id, config.TIMEFRAME_MIN, names, ctx.exit_mode,
-             ctx.sizing_mode)
+    log.info("✅ %s | %s | %d-min | [%s] | conf≥%.2f | exit: %s | size: %s",
+             acct["name"], ctx.contract_id, config.TIMEFRAME_MIN, names,
+             config.PROBA_FLOOR, ctx.exit_mode, ctx.sizing_mode)
     log.info("▶ running — Ctrl-C to stop")
 
     trade_state = None
@@ -215,6 +215,9 @@ if __name__ == "__main__":
                          "(overrides config.RISK_PER_TRADE). Use instead of --size")
     ap.add_argument("--max-contracts", type=int,
                     help="cap on risk-sized contracts (overrides config.MAX_CONTRACTS)")
+    ap.add_argument("--proba-floor", type=float,
+                    help="minimum entry confidence (proba) to take a trade, 0–1 "
+                         "(overrides config.PROBA_FLOOR)")
     ap.add_argument("--retrain-exit", action="store_true",
                     help="retrain the PPO trailing-exit policy, then exit")
     ap.add_argument("--quick", action="store_true",
@@ -225,6 +228,10 @@ if __name__ == "__main__":
 
     if args.size is not None and args.risk is not None:
         raise SystemExit("use either --size or --risk, not both")
+    if args.proba_floor is not None:
+        if not 0.0 <= args.proba_floor <= 1.0:
+            raise SystemExit("--proba-floor must be between 0 and 1")
+        config.PROBA_FLOOR = args.proba_floor
     if args.max_contracts is not None:
         config.MAX_CONTRACTS = args.max_contracts
     if args.size is not None:

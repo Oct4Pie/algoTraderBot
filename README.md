@@ -123,6 +123,7 @@ python bot.py                      # uses config.SIZE contracts
 python bot.py --size 3             # fixed: 3 contracts per trade
 python bot.py --risk 500           # risk-based: ~$500 risked per trade
 python bot.py --risk 500 --max-contracts 5
+python bot.py --proba-floor 0.45   # only take entries graded ≥ 0.45 confidence
 ```
 
 **Sizing** — use a fixed size *or* risk-based sizing (not both). With `--risk`
