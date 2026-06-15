@@ -13,7 +13,7 @@ Pipeline:
     4. benchmark on the holdout vs fixed-2R and constant-trail baselines
     5. export the policy to ppo_trail_exit.npz (torch-free, for the live bot)
 
-The exported .npz is what supertrend_ai_bot.py loads at runtime.
+The exported .npz (models/rl_trail_exit/) is what bot.py loads at runtime.
 """
 import argparse
 import os
@@ -28,8 +28,9 @@ from trail_exit_env import (
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, "data", "NQ_3min.csv")
-OUT_NPZ = os.path.join(HERE, "ppo_trail_exit.npz")
-SB3_ZIP = os.path.join(HERE, "ppo_trail_exit_sb3.zip")
+RL_DIR = os.path.join(HERE, "models", "rl_trail_exit")
+OUT_NPZ = os.path.join(RL_DIR, "ppo_trail_exit.npz")
+SB3_ZIP = os.path.join(RL_DIR, "ppo_trail_exit_sb3.zip")
 HOLDOUT_FRAC = 0.10            # last 10% of bars, never seen in training
 
 
@@ -138,9 +139,16 @@ def main():
     catalog = build_catalog(arr)
 
     # Match live entries: only train the exit on flips the bot would take.
+    # Grade proba with xgboost in a SUBPROCESS so this (torch/SB3) process never
+    # loads xgboost — they segfault together on macOS.
     if args.proba_floor > 0:
-        from precompute_proba import proba_for_catalog
-        proba = proba_for_catalog(df, catalog, args.csv)
+        import precompute_proba as pp
+        proba = pp.read_cache(df, catalog, args.csv)
+        if proba is None:
+            pp.grade_in_subprocess(args.csv, rows=(60_000 if args.quick else None))
+            proba = pp.read_cache(df, catalog, args.csv)
+        if proba is None:
+            raise SystemExit("proba grading failed (see subprocess output)")
         kept = proba >= args.proba_floor
         print(f"  proba floor {args.proba_floor}: kept {kept.sum()} / "
               f"{len(catalog)} flips (the bot's real entries)")

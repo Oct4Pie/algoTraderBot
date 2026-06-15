@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""broker.py — TopstepX / ProjectX Gateway REST client.
+
+A thin wrapper around the order/position/market-data endpoints the bot uses.
+Extracted so the strategy and exit logic stay broker-agnostic.
+"""
+import datetime as dt
+from typing import Optional
+
+import pandas as pd
+import requests
+
+from config import API_BASE
+
+# ── ProjectX enums ─────────────────────────────────────────────────────
+ORDER_TYPE_MARKET = 2
+ORDER_TYPE_STOP = 4
+ORDER_TYPE_TRAILING_STOP = 5
+BRACKET_TYPE_STOP = 4
+BRACKET_TYPE_TRAIL = 5
+BRACKET_TYPE_LIMIT = 1
+ORDER_STATUS_WORKING = 1
+POSITION_LONG = 1
+SIDE = {"BUY": 0, "SELL": 1}
+UNIT_MINUTE = 2
+
+
+class TopstepXClient:
+    """Thin REST wrapper around the TopstepX / ProjectX Gateway API."""
+
+    def __init__(self, username: str, api_key: str, base: str = API_BASE):
+        self.base = base
+        self._username = username
+        self._api_key = api_key
+        self._http = requests.Session()
+        self._token: Optional[str] = None
+
+    def authenticate(self) -> None:
+        r = self._post("/Auth/loginKey",
+                       {"userName": self._username, "apiKey": self._api_key},
+                       auth=False)
+        if not r.get("success") or not r.get("token"):
+            raise RuntimeError(f"login failed: {r.get('errorMessage', r)}")
+        self._token = r["token"]
+        self._http.headers["Authorization"] = f"Bearer {self._token}"
+
+    def pick_account(self, selector: str = "") -> dict:
+        r = self._post("/Account/search", {"onlyActiveAccounts": True})
+        tradable = [a for a in r.get("accounts", []) if a.get("canTrade")]
+        if not tradable:
+            raise RuntimeError("no tradable account found")
+        print("Tradable accounts:")
+        for a in tradable:
+            print(f"   • {a['name']}  (id={a['id']}, balance=${a.get('balance', '?')})")
+        if not selector:
+            return tradable[0]                 # default: first tradable
+        for a in tradable:                     # match by id OR name
+            if str(a["id"]) == str(selector) or a.get("name") == selector:
+                return a
+        raise RuntimeError(f"account {selector!r} not found among tradable accounts")
+
+    def get_active_contract(self, symbol: str) -> dict:
+        # Contract names look like '<symbol><monthcode><yeardigit>' (e.g.
+        # 'NQM6'), so the base symbol is name[:-2]. Letting the broker pick
+        # the active month handles contract rolls for free.
+        r = self._post("/Contract/available", {"live": False})
+        for c in r.get("contracts", []):
+            if c.get("activeContract") and c.get("name", "")[:-2] == symbol:
+                return c
+        raise RuntimeError(f"no active contract found for {symbol!r}")
+
+    def get_bars(self, contract_id: str, minutes: int, limit: int = 300) -> pd.DataFrame:
+        now = dt.datetime.now(dt.timezone.utc)
+        start = now - dt.timedelta(minutes=minutes * (limit + 2))
+        r = self._post("/History/retrieveBars", {
+            "contractId": contract_id, "live": False,
+            "startTime": start.isoformat(), "endTime": now.isoformat(),
+            "unit": UNIT_MINUTE, "unitNumber": minutes,
+            "limit": limit, "includePartialBar": False,
+        })
+        df = pd.DataFrame(r.get("bars", []))
+        if df.empty:
+            return df
+        df = df.rename(columns={"t": "time", "o": "open", "h": "high",
+                                "l": "low", "c": "close", "v": "volume"})
+        df["time"] = pd.to_datetime(df["time"])
+        return df.sort_values("time").reset_index(drop=True)
+
+    def open_position(self, account_id: int, contract_id: str) -> Optional[dict]:
+        r = self._post("/Position/searchOpen", {"accountId": account_id})
+        for p in r.get("positions", []):
+            if p.get("contractId") == contract_id and p.get("size"):
+                return p
+        return None
+
+    def place_market_with_brackets(self, account_id: int, contract_id: str, *,
+                                   side: int, size: int,
+                                   stop_ticks: int, target_ticks: int) -> dict:
+        # One market entry; the gateway attaches + OCO-links the stop and
+        # take-profit (distances are TICKS relative to the fill).
+        r = self._post("/Order/place", {
+            "accountId": account_id, "contractId": contract_id,
+            "type": ORDER_TYPE_MARKET, "side": side, "size": size,
+            "stopLossBracket": {"ticks": stop_ticks, "type": BRACKET_TYPE_STOP},
+            "takeProfitBracket": {"ticks": target_ticks, "type": BRACKET_TYPE_LIMIT},
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
+        return r
+
+    def place_market_with_stop(self, account_id: int, contract_id: str, *,
+                               side: int, size: int, stop_ticks: int) -> dict:
+        # Market entry with only a protective stop attached (no take-profit) —
+        # the PPO trailing exit manages the stop bar-by-bar from here.
+        r = self._post("/Order/place", {
+            "accountId": account_id, "contractId": contract_id,
+            "type": ORDER_TYPE_MARKET, "side": side, "size": size,
+            "stopLossBracket": {"ticks": stop_ticks, "type": BRACKET_TYPE_STOP},
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
+        return r
+
+    def place_market_with_trail(self, account_id: int, contract_id: str, *,
+                                side: int, size: int, trail_ticks: int) -> dict:
+        # Market entry with a broker-native TRAILING stop attached: the gateway
+        # keeps the stop `trail_ticks` behind the best price automatically. The
+        # PPO updates trail_ticks each bar (see modify_trail_price).
+        r = self._post("/Order/place", {
+            "accountId": account_id, "contractId": contract_id,
+            "type": ORDER_TYPE_MARKET, "side": side, "size": size,
+            "stopLossBracket": {"ticks": trail_ticks, "type": BRACKET_TYPE_TRAIL},
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
+        return r
+
+    def working_stop_order(self, account_id: int, contract_id: str) -> Optional[dict]:
+        # Find the live protective stop (plain or trailing) for this contract.
+        r = self._post("/Order/searchOpen", {"accountId": account_id})
+        for o in r.get("orders", []):
+            if (o.get("contractId") == contract_id
+                    and o.get("type") in (ORDER_TYPE_STOP, ORDER_TYPE_TRAILING_STOP)
+                    and o.get("status", ORDER_STATUS_WORKING) == ORDER_STATUS_WORKING):
+                return o
+        return None
+
+    def modify_stop_price(self, account_id: int, order_id: int,
+                          stop_price: float) -> dict:
+        r = self._post("/Order/modify", {
+            "accountId": account_id, "orderId": order_id,
+            "stopPrice": stop_price,
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"stop modify rejected: {r.get('errorMessage', r)}")
+        return r
+
+    def modify_trail_price(self, account_id: int, order_id: int,
+                           trail_price: float) -> dict:
+        # Tighten a native trailing stop's follow distance. NOTE: /Order/modify
+        # exposes trailPrice as a DECIMAL price distance (the bracket is created
+        # in ticks, but the modify field is a price), so callers pass
+        # trail_ticks * tick_size here, not a raw tick count.
+        r = self._post("/Order/modify", {
+            "accountId": account_id, "orderId": order_id,
+            "trailPrice": trail_price,
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"trail modify rejected: {r.get('errorMessage', r)}")
+        return r
+
+    def _post(self, path: str, payload: dict, auth: bool = True) -> dict:
+        if auth and not self._token:
+            raise RuntimeError("not authenticated — call authenticate() first")
+        resp = self._http.post(self.base + path, json=payload, timeout=30)
+        resp.raise_for_status()
+        return resp.json()

@@ -1,105 +1,68 @@
 #!/usr/bin/env python3
 """precompute_proba.py — grade every SuperTrend flip with the entry model.
 
-The live bot only enters a flip when the Chronos+XGBoost head gives
-``proba >= 0.35``. To train the trailing exit on the *same* trades the bot
-actually takes, we need that proba for every flip in the history.
+train_ppo_exit.py trains the PPO exit only on flips the bot would actually take
+(proba >= floor). This computes that proba for every flip once and caches it.
 
-Calling predict.chronos_embedding() once per flip is far too slow (each call
-spawns a fresh torch subprocess that reloads the model). Instead this script:
+Pipeline (all via the public futures_foundation library + the shipped joblib):
+    embeddings = foundation.embed_bars(closes, flip_indices)   # batched, causal
+    hand       = 76 FFM (derive_features, parquet order) + adx + adx_slope
+    proba      = supertrend_chronos.joblib signal_head.predict_proba
 
-    stage 1 (torch only, one subprocess):  batch-embed all flip windows
-    stage 2 (xgboost, main process):       run the two heads -> proba per flip
-
-Results are cached to proba_cache.npz keyed on the data file + flip set, so a
-re-run is instant. Used by train_ppo_exit.py; can also be run standalone:
-
-    python precompute_proba.py            # grade data/NQ_3min.csv flips
+Cached to proba_cache.npz keyed on the data file + flip set, so re-runs are
+instant. Standalone:  python precompute_proba.py
 """
 import argparse
 import hashlib
+import json
 import os
-import subprocess
-import sys
-import tempfile
 
 import numpy as np
 import pandas as pd
 
-from predict import CTX_WINDOW, EMBED_DIM, HAND_DIM
+import config
+import indicators as ind
 from trail_exit_env import build_arrays, build_catalog
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, "data", "NQ_3min.csv")
 CACHE = os.path.join(HERE, "proba_cache.npz")
+SUPERTREND_MODEL = os.path.join(config.MODELS_DIR, "supertrend_chronos.joblib")
+
+with open(config.FFM_COLUMNS_PATH) as _f:
+    _FFM_COLS = json.load(_f)
 
 
-# ── stage 1: batched Chronos embeddings (torch-only subprocess) ────────
+def _ffm_matrix(df: pd.DataFrame) -> np.ndarray:
+    """(n_bars, 76) FFM features for the whole frame, in parquet column order.
+    Computed once via derive_features; absent columns stay NaN."""
+    from futures_foundation.features import derive_features
 
-def _embed_worker(windows_path, out_path):
-    """Runs in a torch-only subprocess: [N,128] log-close windows -> [N,256]
-    masked-mean-pooled embeddings, exactly matching predict._embed_in_this_process
-    but batched over all flips at once."""
-    import torch
-    from chronos import BaseChronosPipeline
-
-    ctx = torch.tensor(np.load(windows_path), dtype=torch.float32)   # [N,128]
-    pipe = BaseChronosPipeline.from_pretrained(
-        "amazon/chronos-bolt-tiny", device_map="cpu", dtype=torch.float32)
-    model = getattr(pipe, "inner_model", None) or pipe.model
-
-    out = np.empty((ctx.shape[0], EMBED_DIM), dtype=np.float32)
-    with torch.no_grad():
-        for s in range(0, ctx.shape[0], 512):                        # chunk
-            chunk = ctx[s:s + 512]
-            h, _ls, _emb, mask = model.encode(context=chunk)
-            w = mask.unsqueeze(-1).to(h.dtype)
-            emb = (h * w).sum(1) / w.sum(1).clamp(min=1.0)
-            out[s:s + chunk.shape[0]] = emb.numpy().astype(np.float32)
-            print(f"  embedded {s + chunk.shape[0]}/{ctx.shape[0]}", flush=True)
-    np.save(out_path, out)
+    feats = derive_features(df.rename(columns={"datetime": "datetime"}),
+                            instrument=config.SYMBOL, atr_period=config.ATR_P)
+    out = np.full((len(df), len(_FFM_COLS)), np.nan, dtype=np.float32)
+    for k, name in enumerate(_FFM_COLS):
+        if name in feats.columns:
+            out[:, k] = feats[name].to_numpy(dtype=np.float32)
+    return out
 
 
-def _embed_all(closes, flip_idx):
-    """Build one [N,128] log-window matrix and embed it in a subprocess."""
-    windows = np.stack([
-        np.log(closes[i - CTX_WINDOW + 1: i + 1]) for i in flip_idx
-    ]).astype(np.float32)
-    with tempfile.TemporaryDirectory() as tmp:
-        in_p, out_p = os.path.join(tmp, "w.npy"), os.path.join(tmp, "e.npy")
-        np.save(in_p, windows)
-        r = subprocess.run(
-            [sys.executable, os.path.abspath(__file__), "--_embed-worker",
-             in_p, out_p])
-        if r.returncode != 0:
-            raise SystemExit("embedding subprocess failed")
-        return np.load(out_p)
+def _hand_all(df: pd.DataFrame, flip_idx: np.ndarray) -> np.ndarray:
+    """(N, 78) SuperTrend hand features = 76 FFM + adx + adx_slope per flip."""
+    bars = df.rename(columns={"datetime": "time"})
+    ffm = _ffm_matrix(df)
+    a = ind.adx(bars, config.ADX_P)
+    k = config.ADX_SLOPE
+    out = np.empty((len(flip_idx), len(_FFM_COLS) + 2), dtype=np.float32)
+    for r, i in enumerate(flip_idx):
+        adx_i = a[i] if np.isfinite(a[i]) else 0.0
+        slope = a[i] - a[i - k] if i >= k and np.isfinite(a[i]) \
+            and np.isfinite(a[i - k]) else 0.0
+        out[r, :-2] = ffm[i]
+        out[r, -2] = adx_i
+        out[r, -1] = slope
+    return out
 
-
-# ── stage 2: hand features + the two XGBoost heads ─────────────────────
-
-def _hand_features(df, flip_idx):
-    """Per-flip 78-vector: 76 proprietary slots NaN (as live), then adx and
-    adx_slope at the flip bar — identical to supertrend_ai_bot.build_features."""
-    from supertrend_ai_bot import adx
-    a = adx(df).to_numpy(dtype=np.float32)
-    feats = np.full((len(flip_idx), HAND_DIM), np.nan, dtype=np.float32)
-    for k, i in enumerate(flip_idx):
-        feats[k, 76] = a[i]
-        feats[k, 77] = a[i] - a[i - 1]
-    return feats
-
-
-def _proba_from_heads(emb, hand):
-    import xgboost as xgb
-    hand = np.nan_to_num(hand, nan=np.nan, posinf=0.0, neginf=0.0)
-    X = np.concatenate([emb, hand], axis=1).astype(np.float32)
-    clf = xgb.XGBClassifier()
-    clf.load_model(os.path.join(HERE, "signal_head.json"))
-    return clf.predict_proba(X)[:, 1].astype(np.float32)
-
-
-# ── cache + public entry point ─────────────────────────────────────────
 
 def _key(csv_path, flip_idx):
     h = hashlib.sha1()
@@ -108,8 +71,33 @@ def _key(csv_path, flip_idx):
     return h.hexdigest()
 
 
+def read_cache(df, catalog, csv_path=DATA_CSV, cache=CACHE):
+    """Numpy-only cache read (no xgboost/torch import). Returns the cached proba
+    aligned to `catalog`, or None if absent / stale. Used by train_ppo_exit so
+    its torch process never loads xgboost (they segfault together on macOS)."""
+    if not os.path.exists(cache):
+        return None
+    z = np.load(cache, allow_pickle=True)
+    return z["proba"] if str(z["key"]) == _key(csv_path, catalog[:, 0]) else None
+
+
+def grade_in_subprocess(csv_path=DATA_CSV, rows=None):
+    """Run this module as a child process to populate the proba cache with
+    xgboost — keeping the caller (which may hold torch/SB3) xgboost-free."""
+    import subprocess
+    import sys
+    cmd = [sys.executable, os.path.abspath(__file__), "--csv", csv_path]
+    if rows:
+        cmd += ["--rows", str(rows)]
+    subprocess.run(cmd, check=True)
+
+
 def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
     """proba aligned 1:1 with `catalog` rows. Cached on (data mtime, flips)."""
+    import futures_foundation.chronos  # noqa: F401  (pipelines.chronos shim)
+    import joblib
+    from futures_foundation import foundation
+
     flip_idx = catalog[:, 0]
     key = _key(csv_path, flip_idx)
     if os.path.exists(cache):
@@ -117,11 +105,14 @@ def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
         if str(z["key"]) == key:
             return z["proba"]
 
-    closes = df["close"].to_numpy(dtype=np.float64)
     print(f"▶ grading {len(flip_idx)} flips (batched embeddings)…")
-    emb = _embed_all(closes, flip_idx)
-    hand = _hand_features(df, flip_idx)
-    proba = _proba_from_heads(emb, hand)
+    closes = df["close"].to_numpy(float)
+    emb = foundation.embed_bars(closes, list(flip_idx), ctx=config.CTX)  # (N,256)
+    hand = _hand_all(df, flip_idx)                                       # (N,78)
+    X = np.concatenate([emb, hand], axis=1).astype(np.float32)
+    bundle = joblib.load(SUPERTREND_MODEL)
+    proba = bundle["signal_head"].predict_proba(X)[:, 1].astype(np.float32)
+
     np.savez(cache, key=key, proba=proba)
     print(f"✅ cached proba → {os.path.relpath(cache, HERE)}")
     return proba
@@ -130,15 +121,12 @@ def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=DATA_CSV)
-    ap.add_argument("--_embed-worker", nargs=2, metavar=("IN", "OUT"),
-                    dest="embed_worker", help=argparse.SUPPRESS)
+    ap.add_argument("--rows", type=int, default=0,
+                    help="grade only the first N bars (matches train --quick)")
     args = ap.parse_args()
-
-    if args.embed_worker:
-        _embed_worker(*args.embed_worker)
-        return
-
     df = pd.read_csv(args.csv)
+    if args.rows:
+        df = df.iloc[:args.rows].reset_index(drop=True)
     catalog = build_catalog(build_arrays(df))
     proba = proba_for_catalog(df, catalog, args.csv)
     for thr in (0.35, 0.45, 0.50):

@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""config.py — all bot settings in one place.
+
+Credentials can also be supplied via the TOPSTEPX_USERNAME / TOPSTEPX_API_KEY /
+TOPSTEPX_ACCOUNT environment variables (those win over the values here).
+"""
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# ══════════════════════════════════════════════════════════════════════
+#  EDIT THESE  (the API KEY from your TopstepX dashboard — not your password)
+TOPSTEPX_USERNAME = "your_login_here"
+TOPSTEPX_API_KEY  = "your_api_key_here"
+# Which account to trade. "" = first tradable account, or set id/name.
+ACCOUNT = ""
+# ══════════════════════════════════════════════════════════════════════
+
+# ── market / sizing ────────────────────────────────────────────────────
+API_BASE = "https://api.topstepx.com/api"
+SYMBOL = "NQ"
+TIMEFRAME_MIN = 3
+SIZE = 1
+
+# ── strategy selection ─────────────────────────────────────────────────
+# Which strategies run. One name = single strategy; list both to run them
+# together — when both fire on the same bar, the higher-proba signal is taken.
+ACTIVE_STRATEGIES = ["supertrend", "ema"]      # "supertrend" and/or "ema"
+PROBA_FLOOR = 0.35          # enter only when a strategy grades its signal >= this
+
+# ── shared trade definition (matches how the models scored trades) ─────
+ATR_P     = 20              # ATR period for the protective stop
+STOP_ATR  = 0.5            # stop = STOP_ATR * ATR(ATR_P) from entry
+ADX_P     = 14
+ADX_SLOPE = 5              # bars for the adx-slope feature
+MIN_GAP   = 20             # (reference) min bars between signals
+CTX       = 128            # Chronos context window
+
+# SuperTrend strategy params
+ST_PERIOD, ST_MULT = 10, 3.0
+# EMA-cross strategy params
+EMA_FAST, EMA_SLOW = 9, 20
+SLOW_SLOPE_K = 5
+ADX_GATE = 18.0            # only fire EMA crosses when ADX >= this (trend gate)
+
+# ── models ─────────────────────────────────────────────────────────────
+MODELS_DIR = os.path.join(HERE, "models")
+FFM_COLUMNS_PATH = os.path.join(MODELS_DIR, "ffm_feature_columns.json")
+
+# ── exit ───────────────────────────────────────────────────────────────
+# When a PPO policy is present the bot manages the exit with a trailing stop;
+# otherwise it falls back to a fixed RR bracket.
+USE_PPO_EXIT = True
+USE_TRAILING_STOP = True    # True = broker-native trailing stop, PPO tightens it;
+                            # False = plain stop the PPO reprices each bar
+POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
+RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)

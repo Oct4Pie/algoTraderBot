@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """trail_exit_env.py — a PPO trailing-exit environment for the SuperTrend bot.
 
-The entry decision stays exactly as it is in supertrend_ai_bot.py (SuperTrend
-flip graded by the Chronos+XGBoost head). What this module replaces is the
-*exit*: instead of a fixed 2R take-profit, a small PPO agent manages a trailing
-stop bar-by-bar.
+The entry decision stays the SuperTrend flip (graded by the Chronos+XGBoost
+head in strategies/). What this module trains is the *exit*: instead of a fixed
+take-profit, a small PPO agent manages a trailing stop bar-by-bar.
 
 Pieces:
     build_arrays(df)      precompute close/high/low/atr + SuperTrend line/dir
@@ -21,7 +20,8 @@ from __future__ import annotations
 import numpy as np
 
 # Reuse the exact indicators the live bot trades on.
-from supertrend_ai_bot import _wilder_atr, supertrend, ST_PERIOD, ST_MULT
+import indicators as ind
+from config import ST_PERIOD, ST_MULT
 
 # ── trade / agent constants ────────────────────────────────────────────
 MAX_HOLD = 80          # force-exit after this many bars (80 * 3min = 4h)
@@ -40,8 +40,8 @@ N_ACTIONS = len(TRAIL_MULTS)
 
 def build_arrays(df, period: int = ST_PERIOD, mult: float = ST_MULT):
     """From an OHLC frame, precompute every per-bar array the sim needs."""
-    line, direction = supertrend(df, period, mult)
-    atr = _wilder_atr(df, ATR_PERIOD).to_numpy(dtype=np.float64)
+    line, direction = ind.supertrend(df, period, mult)
+    atr = np.asarray(ind.atr(df, ATR_PERIOD), dtype=np.float64)
     return {
         "close": df["close"].to_numpy(dtype=np.float64),
         "high": df["high"].to_numpy(dtype=np.float64),
