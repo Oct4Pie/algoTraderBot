@@ -70,3 +70,8 @@ USE_PPO_EXIT = True
 USE_TRAILING_STOP = False
 POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
 RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)
+
+# Give-back cap: the stop is never allowed to sit more than this many R below the
+# running peak (max favorable excursion). The PPO may trail tighter, never looser
+# — so from a +5R peak you exit at ≥ +4.25R, and the worst case loss is this too.
+GIVEBACK_R = 0.75

@@ -68,14 +68,17 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
 
     mult = policy.trail_mult(exit_obs(tee, st, bars, line))   # updates st["mfe"]
     trail_dist = mult * a                                     # price distance
+    # give-back cap: never let the stop sit > GIVEBACK_R below the running peak
+    giveback = config.GIVEBACK_R * st["risk"]
     order = client.working_stop_order(account_id, contract_id)
     if order is None:
         log.warning("   %s  no working stop found — skip trail", stamp)
         return
 
     if trailing:
-        # Native trailing stop: only ever tighten the follow distance.
-        new_ticks = max(1, round(trail_dist / tick_size))
+        # Native trailing stop: only ever tighten the follow distance, and cap
+        # the follow distance at the give-back limit.
+        new_ticks = max(1, round(min(trail_dist, giveback) / tick_size))
         cur_ticks = st.get("trail_ticks") or new_ticks
         if new_ticks < cur_ticks:
             # trailPrice is a decimal price distance, not a tick count
@@ -91,9 +94,13 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
         est = best - sign * (st.get("trail_ticks") or new_ticks) * tick_size
         st["stop"] = max(st["stop"], est) if sign > 0 else min(st["stop"], est)
     else:
-        # Plain stop: reprice the level, favorable ratchet only.
+        # Plain stop: PPO trail level, but never looser than the give-back cap
+        # (peak − GIVEBACK_R), then favorable ratchet only.
+        peak = st["entry"] + sign * st["mfe"] * st["risk"]
+        cap = peak - sign * giveback
         cand = cur - sign * trail_dist
-        new_stop = max(st["stop"], cand) if sign > 0 else min(st["stop"], cand)
+        tightest = max(cand, cap) if sign > 0 else min(cand, cap)
+        new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
         if abs(new_stop - st["stop"]) >= tick_size:
             new_stop = round(new_stop / tick_size) * tick_size
             client.modify_stop_price(account_id, order["id"], new_stop)

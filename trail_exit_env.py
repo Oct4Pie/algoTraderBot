@@ -21,7 +21,7 @@ import numpy as np
 
 # Reuse the exact indicators the live bot trades on.
 import indicators as ind
-from config import ST_PERIOD, ST_MULT, STOP_ATR, ATR_P
+from config import ST_PERIOD, ST_MULT, STOP_ATR, ATR_P, GIVEBACK_R
 
 # ── trade / agent constants ────────────────────────────────────────────
 MAX_HOLD = 80          # force-exit after this many bars (80 * 3min = 4h)
@@ -131,8 +131,12 @@ class TrailExitSim:
     def step(self, action: int):
         s = self.sign
         mult = float(TRAIL_MULTS[action])
-        # candidate trail off the just-closed bar, then ratchet favorably
+        # candidate trail off the just-closed bar, but never looser than the
+        # give-back cap (peak − GIVEBACK_R), then ratchet favorably
         cand = self.close[self.i] - s * mult * self.atr[self.i]
+        peak = self.entry + s * self.mfe * self.risk
+        cap = peak - s * GIVEBACK_R * self.risk
+        cand = max(cand, cap) if s > 0 else min(cand, cap)
         self.stop = max(self.stop, cand) if s > 0 else min(self.stop, cand)
 
         self.i += 1

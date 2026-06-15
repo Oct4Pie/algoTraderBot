@@ -107,6 +107,7 @@ live trading — backtesting works without them.)
 ```python
 ACTIVE_STRATEGIES = ["supertrend", "ema"]   # one name, or both (highest proba wins)
 PROBA_FLOOR       = 0.35                     # only take signals graded ≥ this
+GIVEBACK_R        = 0.75                     # stop never sits > this R below the peak
 USE_PPO_EXIT      = True                     # False → fixed-RR bracket instead
 USE_TRAILING_STOP = False                    # False → PPO reprices the stop each bar
                                              #         (policy-driven, the default);
@@ -134,9 +135,12 @@ and every trailing-stop move are logged via `log.info` to both the console and
 - **Exit** — each bar the PPO policy (`models/rl_trail_exit/`) reads the open
   trade (unrealized R, MFE, ATR, momentum, distance from the strategy's reference
   line), computes a trailing-stop level, and **reprices the live stop to it via
-  `/Order/modify`** (ratcheting only in your favor). It's trained on the same
-  0.5×ATR(20) risk the entries use, so it learns the trail on the live scale. If
-  no policy is present it falls back to a fixed `RR` bracket. The policy
+  `/Order/modify`** (ratcheting only in your favor). A hard **give-back cap**
+  (`GIVEBACK_R`, default 0.75) sits on top: the stop is never allowed more than
+  0.75R below the running peak, so you give back at most 0.75R from the best
+  point (and the worst-case loss is 0.75R too). The PPO may trail tighter, never
+  looser. It's trained on the same 0.5×ATR(20) risk and the same cap. If no
+  policy is present it falls back to a fixed `RR` bracket. The policy
   forward-pass is pure numpy, so the bot never loads torch/SB3 next to xgboost.
 
 ## Backtest (no API, no credentials)
@@ -197,7 +201,9 @@ The printed holdout table is the source of truth for current performance.
   (the policy reprices `stopPrice` each bar — what it's trained for). The
   alternative `True` uses the ProjectX native trailing bracket (`type 5`) +
   `/Order/modify` `trailPrice`; the PPO can only *tighten* it there, so it mostly
-  sits idle. Backtests show the PPO trail tends to run wide — it captures large
-  favorable excursions (MFE) but gives much of it back; a tighter retrain is the
-  natural next tuning step.
+  sits idle. With `GIVEBACK_R = 0.75` the give-back cap dominates the exit (every
+  trail multiple converges to the same result), so the policy is effectively a
+  deterministic "trail 0.75R from peak". Loosen `GIVEBACK_R` to let the PPO and
+  trend-riding matter more (higher mean-R, more give-back); tighten it for more
+  consistency (higher capture, more trends cut short).
 - **Internet** needed once for the Chronos checkpoint; offline after.
