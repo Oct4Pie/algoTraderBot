@@ -181,6 +181,8 @@ if __name__ == "__main__":
                     help="backtest symbol (uses data/<symbol>_3min.csv)")
     ap.add_argument("--start", help="backtest start date (YYYY-MM-DD, inclusive)")
     ap.add_argument("--end", help="backtest end date (YYYY-MM-DD, exclusive)")
+    ap.add_argument("--size", type=int,
+                    help="contracts per trade (overrides config.SIZE)")
     ap.add_argument("--retrain-exit", action="store_true",
                     help="retrain the PPO trailing-exit policy, then exit")
     ap.add_argument("--quick", action="store_true",
@@ -188,6 +190,11 @@ if __name__ == "__main__":
     ap.add_argument("--timesteps", type=int, default=600_000,
                     help="with --retrain-exit: PPO training steps")
     args = ap.parse_args()
+
+    if args.size is not None:
+        if args.size < 1:
+            raise SystemExit("--size must be >= 1")
+        config.SIZE = args.size          # runtime override (handle_bar reads config.SIZE)
 
     if args.retrain_exit:
         _retrain_exit(args.quick, args.timesteps)

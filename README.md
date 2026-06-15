@@ -119,7 +119,8 @@ USE_TRAILING_STOP = False                    # False → PPO reprices the stop e
 **4. Run:**
 
 ```bash
-python bot.py
+python bot.py                 # uses config.SIZE contracts
+python bot.py --size 3         # override contracts per trade from the CLI
 ```
 
 It prints your tradable accounts on startup — make sure it picks the **practice**
