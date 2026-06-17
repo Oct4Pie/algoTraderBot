@@ -110,7 +110,8 @@ class TrailExitSim:
         self.risk = STOP_ATR * float(self.atr_stop[entry_idx])
         self.stop = self.entry - self.sign * self.risk
         self.bars_held = 0
-        self.mfe = 0.0
+        self.mfe = 0.0           # close-based, for the observation (matches live)
+        self.peak_R = 0.0        # bar-extreme peak, for the give-back cap
         self.prev_value = 0.0
         self.realized_R = None
         return self._obs()
@@ -135,28 +136,30 @@ class TrailExitSim:
     def step(self, action: int):
         s = self.sign
         mult = float(TRAIL_MULTS[action])
-        # Hold the initial stop until the peak reaches ACTIVATE_R; then trail off
-        # the just-closed bar, never looser than the give-back cap (peak −
-        # GIVEBACK_R), ratcheting favorably.
-        if self.mfe >= ACTIVATE_R:
-            cand = self.close[self.i] - s * mult * self.atr[self.i]
-            peak = self.entry + s * self.mfe * self.risk
-            cap = peak - s * GIVEBACK_R * self.risk
-            cand = max(cand, cap) if s > 0 else min(cand, cap)
-            self.stop = max(self.stop, cand) if s > 0 else min(self.stop, cand)
-
         self.i += 1
         self.bars_held += 1
         done = False
         if self.i >= self.n:                          # ran out of history
             exit_price, done = self.close[self.i - 1], True
         else:
-            hi, lo = self.high[self.i], self.low[self.i]
-            hit = (lo <= self.stop) if s > 0 else (hi >= self.stop)
+            i = self.i
+            # Peak from the bar's FAVORABLE extreme; once activated, trail with
+            # the give-back cap, then enforce the stop against the bar's
+            # UNFAVORABLE extreme INTRA-BAR (models tick-level trailing — a spike
+            # that reverts within one bar exits at the give-back level).
+            fav = self.high[i] if s > 0 else self.low[i]
+            self.peak_R = max(self.peak_R, s * (fav - self.entry) / self.risk)
+            if self.peak_R >= ACTIVATE_R:
+                cand = self.close[i] - s * mult * self.atr[i]
+                cap = (self.entry + s * self.peak_R * self.risk) - s * GIVEBACK_R * self.risk
+                cand = max(cand, cap) if s > 0 else min(cand, cap)
+                self.stop = max(self.stop, cand) if s > 0 else min(self.stop, cand)
+            unfav = self.low[i] if s > 0 else self.high[i]
+            hit = (unfav <= self.stop) if s > 0 else (unfav >= self.stop)
             if hit:
                 exit_price, done = self.stop, True    # filled at the stop
             elif self.bars_held >= MAX_HOLD:
-                exit_price, done = self.close[self.i], True
+                exit_price, done = self.close[i], True
             else:
                 exit_price = None
 

@@ -5,6 +5,8 @@ Strategy-agnostic: the per-bar reference line comes from the strategy that
 opened the trade (stored in trade_state). The policy picks a trail tightness;
 we push it to the broker as a stop reprice or a native-trail tighten.
 """
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -14,6 +16,13 @@ from broker import POSITION_LONG
 from logsetup import get_logger
 
 log = get_logger()
+
+
+def _snap(price: float, sign: int, tick: float) -> float:
+    """Direction-aware tick snap so a rounded stop never lands on the wrong side
+    of the market: a long stop sits below price → floor; a short stop above → ceil."""
+    return (math.floor(price / tick) * tick if sign > 0
+            else math.ceil(price / tick) * tick)
 
 
 def reconstruct_state(client, account_id, contract_id, pos, strategy) -> dict | None:
@@ -30,7 +39,8 @@ def reconstruct_state(client, account_id, contract_id, pos, strategy) -> dict | 
     if risk <= 0:
         return None
     return {"sign": sign, "entry": float(entry), "risk": risk, "stop": stop,
-            "bars_held": 0, "mfe": 0.0, "trail_ticks": None, "strategy": strategy}
+            "bars_held": 0, "mfe": 0.0, "peak_R": 0.0, "trail_ticks": None,
+            "strategy": strategy}
 
 
 def exit_obs(tee, st: dict, bars: pd.DataFrame) -> np.ndarray:
@@ -57,64 +67,83 @@ def exit_obs(tee, st: dict, bars: pd.DataFrame) -> np.ndarray:
 
 def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
                  bars, st: dict, trailing: bool):
-    """One bar of exit management: ask the policy how tight to trail, then push
-    that to the broker. In `trailing` mode the order natively follows price and
-    we only tighten its follow DISTANCE; otherwise we reprice a plain stop. Both
-    only ever ratchet in our favor."""
+    """One bar of exit management. Returns the (possibly updated) trade_state, or
+    None if the position was closed. Asks the policy how tight to trail, then:
+      • anchors the peak to the bar's FAVORABLE extreme (catches intra-bar spikes);
+      • if the bar's UNFAVORABLE extreme crossed the trailed stop, ENFORCES it by
+        closing at market (the resting broker stop may be stale / wrong-side);
+      • otherwise reprices the stop (direction-aware tick snap)."""
     st["bars_held"] += 1
     sign = st["sign"]
     a = float(ind.atr(bars, tee.ATR_PERIOD)[-1])
-    cur = float(bars["close"].iloc[-1])
+    bar = bars.iloc[-1]
+    cur, hi, lo = float(bar["close"]), float(bar["high"]), float(bar["low"])
     stamp = bars["time"].iloc[-1].strftime("%H:%M")
 
-    obs = exit_obs(tee, st, bars)                             # updates st["mfe"]
+    # Peak tracks the bar's FAVORABLE extreme (high for long, low for short), so
+    # the give-back level reflects the true intra-bar peak, not just the close.
+    fav = hi if sign > 0 else lo
+    st["peak_R"] = max(st.get("peak_R", 0.0), sign * (fav - st["entry"]) / st["risk"])
+
+    obs = exit_obs(tee, st, bars)                            # obs mfe stays close-based
 
     # Hold the initial stop until the trade's peak reaches ACTIVATE_R.
-    if st["mfe"] < config.ACTIVATE_R:
+    if st["peak_R"] < config.ACTIVATE_R:
         log.info("   %s  armed — peak %.2fR < %.1fR, holding initial stop",
-                 stamp, st["mfe"], config.ACTIVATE_R)
-        return
+                 stamp, st["peak_R"], config.ACTIVATE_R)
+        return st
 
     mult = policy.trail_mult(obs)
     trail_dist = mult * a                                     # price distance
-    # give-back cap: never let the stop sit > GIVEBACK_R below the running peak
     giveback = config.GIVEBACK_R * st["risk"]
     order = client.working_stop_order(account_id, contract_id)
     if order is None:
         log.warning("   %s  no working stop found — skip trail", stamp)
-        return
+        return st
 
     if trailing:
-        # Native trailing stop: only ever tighten the follow distance, and cap
-        # the follow distance at the give-back limit.
+        # Native trailing stop: only ever tighten the follow distance, capped at
+        # the give-back limit (the broker trails tick-by-tick between bars).
         new_ticks = max(1, round(min(trail_dist, giveback) / tick_size))
         cur_ticks = st.get("trail_ticks") or new_ticks
         if new_ticks < cur_ticks:
-            # trailPrice is a decimal price distance, not a tick count
-            client.modify_trail_price(account_id, order["id"],
-                                      new_ticks * tick_size)
+            client.modify_trail_price(account_id, order["id"], new_ticks * tick_size)
             st["trail_ticks"] = new_ticks
             log.info("   %s  trail tightened → %dt (%.2fx ATR, %d bars in)",
                      stamp, new_ticks, mult, st["bars_held"])
         else:
             log.info("   %s  hold trail %dt (%.2fx ATR)", stamp, cur_ticks, mult)
-        # keep a stop estimate for the observation (broker trails from best price)
-        best = st["entry"] + sign * st["mfe"] * st["risk"]
+        best = st["entry"] + sign * st["peak_R"] * st["risk"]
         est = best - sign * (st.get("trail_ticks") or new_ticks) * tick_size
         st["stop"] = max(st["stop"], est) if sign > 0 else min(st["stop"], est)
-    else:
-        # Plain stop: PPO trail level, but never looser than the give-back cap
-        # (peak − GIVEBACK_R), then favorable ratchet only.
-        peak = st["entry"] + sign * st["mfe"] * st["risk"]
-        cap = peak - sign * giveback
-        cand = cur - sign * trail_dist
-        tightest = max(cand, cap) if sign > 0 else min(cand, cap)
-        new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
-        if abs(new_stop - st["stop"]) >= tick_size:
-            new_stop = round(new_stop / tick_size) * tick_size
+        return st
+
+    # Plain stop: PPO trail level, never looser than the give-back cap
+    # (peak − GIVEBACK_R), favorable ratchet only, direction-aware tick snap.
+    peak_price = st["entry"] + sign * st["peak_R"] * st["risk"]
+    cap = peak_price - sign * giveback
+    cand = cur - sign * trail_dist
+    tightest = max(cand, cap) if sign > 0 else min(cand, cap)
+    new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
+    new_stop = _snap(new_stop, sign, tick_size)
+
+    # Enforce the trailed SL: if this bar's UNFAVORABLE extreme crossed it, the
+    # stop is hit — close at market rather than send a (possibly rejected) modify.
+    unfav = lo if sign > 0 else hi
+    if (unfav <= new_stop) if sign > 0 else (unfav >= new_stop):
+        client.close_position(account_id, contract_id, price=new_stop)
+        log.info("   %s  trailed-SL crossed (bar %s=%.2f vs SL %.2f) — closed at market",
+                 stamp, "low" if sign > 0 else "high", unfav, new_stop)
+        return None
+
+    if abs(new_stop - st["stop"]) >= tick_size:
+        try:
             client.modify_stop_price(account_id, order["id"], new_stop)
             st["stop"] = new_stop
             log.info("   %s  trail → stop %.2f (%.2fx ATR, %d bars in)",
                      stamp, new_stop, mult, st["bars_held"])
-        else:
-            log.info("   %s  hold (stop %.2f, %.2fx ATR)", stamp, st["stop"], mult)
+        except Exception as e:        # valid-side reject (e.g. min distance) — wick-cross will enforce
+            log.warning("   %s  stop modify rejected (%s) — holding %.2f", stamp, e, st["stop"])
+    else:
+        log.info("   %s  hold (stop %.2f, %.2fx ATR)", stamp, st["stop"], mult)
+    return st

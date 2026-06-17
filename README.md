@@ -187,6 +187,15 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
   once it's up +2R it locks in ≥ +1.25R and rides, giving back ≤ 0.75R from the
   best point. The policy forward-pass is pure numpy, so the bot never loads
   torch/SB3 next to xgboost.
+- **Trailed-stop enforcement (intra-bar).** The peak is tracked from each bar's
+  favorable extreme (not just the close), and if a bar's *unfavorable* wick
+  crosses the trailed stop the bot **closes at market** (`/Position/closeContract`)
+  rather than rely on a resting broker stop — which the broker rejects ("Invalid
+  stop price") when a fast reversal puts the lock level on the wrong side of the
+  market. This fixes a bug where a big winner could ride all the way back to the
+  initial −1R stop because every stop-modify was rejected. Stops are also
+  direction-aware tick-snapped (floor longs / ceil shorts) so rounding never
+  lands them on the wrong side.
 
 ## Architecture
 

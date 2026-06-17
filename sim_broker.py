@@ -146,3 +146,11 @@ class SimBroker(OrderRouter):
         if self.pos is not None:
             self.pos["trail_ticks"] = max(1, round(trail_price / self.tick))
         return {"success": True}
+
+    def close_position(self, account_id, contract_id, price=None):
+        # Market-close: fill at `price` (the enforced trailed-SL level) if given,
+        # else the current bar's close. Records the trade with reason "trail".
+        if self.pos is not None:
+            fill = price if price is not None else float(self.df.iloc[self.cursor]["close"])
+            self._close(fill, self.cursor, "trail")
+        return {"success": True}

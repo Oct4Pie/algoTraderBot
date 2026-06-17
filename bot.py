@@ -104,9 +104,9 @@ def handle_bar(ctx: BotContext, bars, trade_state):
             trade_state = ex.reconstruct_state(
                 c, ctx.account_id, ctx.contract_id, pos, ctx.strategies[0])
         if trade_state:
-            ex.manage_trail(ctx.tee, ctx.policy, c, ctx.account_id,
-                            ctx.contract_id, ctx.tick_size, bars,
-                            trade_state, ctx.trailing)
+            trade_state = ex.manage_trail(ctx.tee, ctx.policy, c, ctx.account_id,
+                                          ctx.contract_id, ctx.tick_size, bars,
+                                          trade_state, ctx.trailing)
         return trade_state
 
     # Flat — detect across strategies (cheap), then grade. Strategies that fire
@@ -137,7 +137,8 @@ def handle_bar(ctx: BotContext, bars, trade_state):
     if ctx.policy is not None:
         trade_state = {"sign": sig.direction, "entry": sig.entry,
                        "risk": sig.risk, "stop": sig.stop, "bars_held": 0,
-                       "mfe": 0.0, "trail_ticks": stop_ticks, "strategy": s}
+                       "mfe": 0.0, "peak_R": 0.0, "trail_ticks": stop_ticks,
+                       "strategy": s}
         if ctx.trailing:
             c.place_market_with_trail(ctx.account_id, ctx.contract_id,
                                       side=side, size=size, trail_ticks=stop_ticks)

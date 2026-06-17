@@ -203,6 +203,16 @@ class TopstepXClient(BrokerClient):
             raise RuntimeError(f"trail modify rejected: {r.get('errorMessage', r)}")
         return r
 
+    def close_position(self, account_id: int, contract_id: str, price=None) -> dict:
+        # Flatten the whole position at market. `price` is ignored — the broker
+        # fills at market (it's only a fill hint for the backtest sim).
+        r = self._post("/Position/closeContract", {
+            "accountId": account_id, "contractId": contract_id,
+        })
+        if not r.get("success"):
+            raise RuntimeError(f"close rejected: {r.get('errorMessage', r)}")
+        return r
+
     def _post(self, path: str, payload: dict, auth: bool = True) -> dict:
         if auth and not self._token:
             raise RuntimeError("not authenticated — call authenticate() first")
