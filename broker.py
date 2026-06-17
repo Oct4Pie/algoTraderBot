@@ -24,9 +24,25 @@ BRACKET_TYPE_TRAIL = 5
 BRACKET_TYPE_LIMIT = 1
 ORDER_STATUS_WORKING = 1
 UNIT_MINUTE = 2
+MIN_BRACKET_TICKS = 4          # TopstepX requires the SL ≥ 4 ticks from the fill
 
 __all__ = ["TopstepXClient", "make_broker", "fetch_contract_specs",
            "SIDE", "POSITION_LONG"]
+
+
+def _stop_bracket_ticks(side: int, ticks: int) -> int:
+    """Signed SL-bracket ticks RELATIVE to the fill: negative for a long (stop
+    below), positive for a short (stop above) — TopstepX's convention. Magnitude
+    is clamped to the 4-tick broker minimum."""
+    mag = max(MIN_BRACKET_TICKS, abs(int(ticks)))
+    return -mag if side == SIDE["BUY"] else mag
+
+
+def _target_bracket_ticks(side: int, ticks: int) -> int:
+    """Signed TP-bracket ticks: positive for a long (target above), negative for
+    a short (target below)."""
+    mag = max(MIN_BRACKET_TICKS, abs(int(ticks)))
+    return mag if side == SIDE["BUY"] else -mag
 
 
 def make_broker() -> BrokerClient:
@@ -135,8 +151,10 @@ class TopstepXClient(BrokerClient):
         r = self._post("/Order/place", {
             "accountId": account_id, "contractId": contract_id,
             "type": ORDER_TYPE_MARKET, "side": side, "size": size,
-            "stopLossBracket": {"ticks": stop_ticks, "type": BRACKET_TYPE_STOP},
-            "takeProfitBracket": {"ticks": target_ticks, "type": BRACKET_TYPE_LIMIT},
+            "stopLossBracket": {"ticks": _stop_bracket_ticks(side, stop_ticks),
+                                "type": BRACKET_TYPE_STOP},
+            "takeProfitBracket": {"ticks": _target_bracket_ticks(side, target_ticks),
+                                  "type": BRACKET_TYPE_LIMIT},
         })
         if not r.get("success"):
             raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
@@ -149,7 +167,8 @@ class TopstepXClient(BrokerClient):
         r = self._post("/Order/place", {
             "accountId": account_id, "contractId": contract_id,
             "type": ORDER_TYPE_MARKET, "side": side, "size": size,
-            "stopLossBracket": {"ticks": stop_ticks, "type": BRACKET_TYPE_STOP},
+            "stopLossBracket": {"ticks": _stop_bracket_ticks(side, stop_ticks),
+                                "type": BRACKET_TYPE_STOP},
         })
         if not r.get("success"):
             raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
@@ -163,7 +182,8 @@ class TopstepXClient(BrokerClient):
         r = self._post("/Order/place", {
             "accountId": account_id, "contractId": contract_id,
             "type": ORDER_TYPE_MARKET, "side": side, "size": size,
-            "stopLossBracket": {"ticks": trail_ticks, "type": BRACKET_TYPE_TRAIL},
+            "stopLossBracket": {"ticks": _stop_bracket_ticks(side, trail_ticks),
+                                "type": BRACKET_TYPE_TRAIL},
         })
         if not r.get("success"):
             raise RuntimeError(f"order rejected: {r.get('errorMessage', r)}")
