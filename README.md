@@ -296,7 +296,12 @@ current performance.
 
 ```bash
 pytest tests/                         # unit + end-to-end, ~1s
+git config core.hooksPath .githooks   # once per clone: run tests on every commit
 ```
+
+The versioned `.githooks/pre-commit` runs the suite before each commit and aborts
+if anything fails (`git commit --no-verify` skips it). Enable it once per clone
+with the command above.
 
 No network, broker, or Chronos needed — everything runs against the `SimBroker`
 and lightweight fakes. Coverage focuses on the order/exit money paths:
