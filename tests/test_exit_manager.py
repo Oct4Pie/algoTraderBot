@@ -71,13 +71,15 @@ def _short_state(peak_R=2.0):
 def test_giveback_wick_cross_closes_at_market():
     # SHORT +2R, then the bar spikes back UP through the trailed give-back stop.
     # peak from low 78 → +2.2R; cap = 78 + 0.75R(7.5) = 85.5; bar high 92 ≥ 85.5.
+    # The floor was tightened THIS bar (not resting), so it's a MARKET close — the
+    # realistic fill is the bar CLOSE (90), not the optimistic floor (85.5).
     st = _short_state()
     client = FakeBroker(stop_price=110.0)
     out = manage_trail(tee, FakePolicy(), client, 1, "NQ", TICK,
                        _bars((92.0, 78.0, 90.0)), st, trailing=False)
     assert out is None                       # position closed
     assert len(client.closed) == 1           # via market close, not a modify
-    assert abs(client.closed[0] - 85.5) < 0.25
+    assert abs(client.closed[0] - 90.0) < 0.25   # filled at the bar close (market)
     assert client.modified == []
 
 

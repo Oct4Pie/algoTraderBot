@@ -74,6 +74,9 @@ def _train_exit(close, high, low, e, sign):
 
 
 def _live_exit(close, high, low, e, sign, monkeypatch):
+    # Faithful to the live/backtest flow: each bar the RESTING broker stop (set
+    # last bar) is checked first (the broker / SimBroker.process_exits fills it at
+    # that level), THEN manage_trail runs (which may market-close as the backup).
     monkeypatch.setattr(exit_manager.ind, "atr", lambda b, p: np.full(len(b), ATR_TRAIL))
     bars = _bars(close, high, low)
     entry = float(bars["close"].iloc[e])
@@ -82,10 +85,14 @@ def _live_exit(close, high, low, e, sign, monkeypatch):
           "bars_held": 0, "mfe": 0.0, "peak_R": 0.0, "trail_ticks": None, "strategy": None}
     client = FakeBroker(st["stop"])
     for t in range(e + 1, len(close)):
+        resting = st["stop"]                          # the resting broker stop this bar
+        unfav = low[t] if sign > 0 else high[t]
+        if (unfav <= resting) if sign > 0 else (unfav >= resting):
+            return t, resting                         # resting-stop fill (at the floor)
         out = exit_manager.manage_trail(tee, FixedPolicy(), client, 1, "NQ", TICK,
                                         bars.iloc[: t + 1], st, trailing=False)
         if out is None:
-            return t, client.closed[-1]
+            return t, client.closed[-1]               # market-close backup (bar close)
     return None, None
 
 
@@ -113,6 +120,20 @@ def test_short_giveback_parity(monkeypatch):
     low = [c - 0.5 for c in close]
     idx, px = _assert_parity(close, high, low, e=5, sign=-1, monkeypatch=monkeypatch)
     assert idx == 11 and abs(px - 97.0) <= TICK
+
+
+def test_within_bar_spike_fills_at_bar_close(monkeypatch):
+    # The honest case: price spikes to +2R and reverses INSIDE one bar. The give-
+    # back floor was tightened THIS bar (not a resting order yet), so live closes
+    # at MARKET — both engines fill at the bar CLOSE, not the optimistic floor.
+    # entry @100 (idx5), bar 6: high 105 (peak +2.5R activates), low 100.5, close 100.5.
+    close = [100, 100, 100, 100, 100, 100, 100.5, 100.5]
+    high = [c + 0.5 for c in close]
+    low = [c - 0.5 for c in close]
+    high[6], low[6] = 105.0, 100.5
+    idx, px = _assert_parity(close, high, low, e=5, sign=1, monkeypatch=monkeypatch)
+    assert idx == 6                                  # exits on the spike bar (after entry)
+    assert abs(px - 100.5) <= TICK                   # at the bar close (~+0.25R), NOT the +1.75R floor
 
 
 def test_max_hold_timeout_parity(monkeypatch):

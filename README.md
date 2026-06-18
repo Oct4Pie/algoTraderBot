@@ -199,16 +199,23 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
 - **Training = live parity.** The policy is trained inside `TrailExitSim`
   (`trail_exit_env.py`) and run live by `exit_manager.manage_trail`; the two
   implement the *same* give-back logic — activation gate, peak from the bar's
-  favorable extreme, give-back cap, the intra-bar wick enforcement, **and the
-  `MAX_HOLD` force-exit** (the policy observes `bars_held/MAX_HOLD`, so live force-
-  exits at the same horizon it was trained on). The only accepted difference is
-  fill granularity: live fills per-tick at the broker, the sim at the bar's
-  unfavorable extreme — but that extreme bounds every intra-bar tick, so the
-  bar-resolution decision is identical. Entry and exit are never the same candle:
-  both engines start evaluating exits on the bar *after* entry (entry fills at the
-  signal bar's close). All of this is locked by `tests/test_train_live_parity.py`,
-  which drives the same trade through both engines and asserts an identical exit
-  bar and price.
+  favorable extreme, give-back cap, and the `MAX_HOLD` force-exit (the policy
+  observes `bars_held/MAX_HOLD`, so live force-exits at the same horizon it was
+  trained on). Crucially they share the same **two-tier fill model** (the design
+  algoTraderAI uses): the protective stop is a **resting broker stop order kept at
+  the give-back floor**, repriced each bar. A give-back exit therefore fills one
+  of two ways, and the sim models both so the policy trains on realistic prices:
+    - **resting-stop fill at the floor** — when price crosses the floor that was
+      already resting from a prior bar (the common, slow give-back); accurate.
+    - **market-close at the bar close** — only when a fast spike-and-reverse
+      crosses a floor that was *tightened this bar* and isn't a resting order yet,
+      so live closes at market (worse than the floor). The old sim recorded this
+      optimistically at the floor; it now fills at the bar close, matching live.
+  Entry and exit are never the same candle (both engines start evaluating exits on
+  the bar *after* entry). All of this is locked by
+  `tests/test_train_live_parity.py`, which drives the same trade through both
+  engines and asserts an identical exit bar **and price**, including the
+  spike-and-reverse market-close case. The PPO was retrained on this corrected sim.
 
 ### Order safety (live)
 

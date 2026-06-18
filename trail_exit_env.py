@@ -143,24 +143,40 @@ class TrailExitSim:
             exit_price, done = self.close[self.i - 1], True
         else:
             i = self.i
-            # Peak from the bar's FAVORABLE extreme; once activated, trail with
-            # the give-back cap, then enforce the stop against the bar's
-            # UNFAVORABLE extreme INTRA-BAR (models tick-level trailing — a spike
-            # that reverts within one bar exits at the give-back level).
+            # TWO-TIER EXIT — models EXACTLY how the live bot fills, so the policy
+            # trains on realistic prices (matches exit_manager.manage_trail +
+            # SimBroker, the same design algoTraderAI uses: a resting broker stop
+            # order kept at the floor, with a market close only as the backup).
+            #
+            #   prior_stop = the RESTING broker stop during this bar — the level
+            #   set LAST bar (live reprices at each bar close, so intra-bar the
+            #   resting order sits at last bar's floor).
+            #
+            #   • bar's unfavorable extreme crosses prior_stop → the resting stop
+            #     order FILLS intra-bar AT that level (the give-back floor).
+            #   • else it only crosses the floor we TIGHTEN to THIS bar (not yet a
+            #     resting order) → live closes at MARKET → fill at the bar close
+            #     (worse than the floor on a fast spike-and-reverse; this is the
+            #     case the old sim modeled optimistically at the floor).
+            prior_stop = self.stop
             fav = self.high[i] if s > 0 else self.low[i]
             self.peak_R = max(self.peak_R, s * (fav - self.entry) / self.risk)
             if self.peak_R >= ACTIVATE_R:
                 cand = self.close[i] - s * mult * self.atr[i]
                 cap = (self.entry + s * self.peak_R * self.risk) - s * GIVEBACK_R * self.risk
                 cand = max(cand, cap) if s > 0 else min(cand, cap)
-                self.stop = max(self.stop, cand) if s > 0 else min(self.stop, cand)
-            unfav = self.low[i] if s > 0 else self.high[i]
-            hit = (unfav <= self.stop) if s > 0 else (unfav >= self.stop)
-            if hit:
-                exit_price, done = self.stop, True    # filled at the stop
-            elif self.bars_held >= MAX_HOLD:
-                exit_price, done = self.close[i], True
+                new_stop = max(prior_stop, cand) if s > 0 else min(prior_stop, cand)
             else:
+                new_stop = prior_stop
+            unfav = self.low[i] if s > 0 else self.high[i]
+            if (unfav <= prior_stop) if s > 0 else (unfav >= prior_stop):
+                exit_price, done = prior_stop, True       # resting-stop fill (floor)
+            elif (unfav <= new_stop) if s > 0 else (unfav >= new_stop):
+                exit_price, done = self.close[i], True     # market-close backup (bar close)
+            elif self.bars_held >= MAX_HOLD:
+                exit_price, done = self.close[i], True      # max-hold timeout
+            else:
+                self.stop = new_stop                        # reprice resting stop for next bar
                 exit_price = None
 
         if done:

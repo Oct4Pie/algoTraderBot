@@ -125,15 +125,19 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
             new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
             new_stop = _snap(new_stop, sign, tick_size)
 
-            # Enforce the trailed SL: if this bar's UNFAVORABLE extreme crossed it,
-            # the stop is hit — close at market (the resting broker stop may be
-            # stale / wrong-side). Checked BEFORE the timeout so a stop hit takes
-            # precedence, exactly as TrailExitSim does (hit, then `elif` timeout).
+            # Enforce the trailed SL: if this bar's UNFAVORABLE extreme crossed the
+            # floor we just TIGHTENED to (which isn't a resting order yet — the
+            # resting stop at the PRIOR level is filled by the broker /
+            # SimBroker.process_exits), close at MARKET. The realistic fill is the
+            # bar close (cur), NOT the floor — on a fast spike-and-reverse the
+            # market is already past the floor. So the sim isn't optimistic and
+            # matches the trained TrailExitSim's market-close tier. Checked BEFORE
+            # the timeout so a stop hit takes precedence (hit, then `elif` timeout).
             unfav = lo if sign > 0 else hi
             if (unfav <= new_stop) if sign > 0 else (unfav >= new_stop):
-                client.close_position(account_id, contract_id, price=new_stop)
-                log.info("   %s  trailed-SL crossed (bar %s=%.2f vs SL %.2f) — closed at market",
-                         stamp, "low" if sign > 0 else "high", unfav, new_stop)
+                client.close_position(account_id, contract_id, price=cur)
+                log.info("   %s  trailed-SL crossed (bar %s=%.2f vs SL %.2f) — market close @ %.2f",
+                         stamp, "low" if sign > 0 else "high", unfav, new_stop, cur)
                 return None
             if abs(new_stop - st["stop"]) >= tick_size:
                 try:
