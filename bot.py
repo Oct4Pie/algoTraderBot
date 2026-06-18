@@ -109,10 +109,23 @@ def handle_bar(ctx: BotContext, bars, trade_state):
                                           trade_state, ctx.trailing)
         return trade_state
 
-    # Flat — reconcile first: a flat account should have NO resting orders, so
-    # cancel any strays (e.g. a stop bracket orphaned by a market close, a missed
-    # exit, or a manual order). Left alone, a stray could fill into an unmanaged
-    # naked position the bot never opened and never trails.
+    # Flat. If we were holding a trade (trade_state set) but the broker shows no
+    # position and we didn't close it ourselves, the RESTING protective stop filled
+    # at the broker. That exit is otherwise SILENT (manage_trail never ran), so log
+    # it — inferred from the stop level it rested at — then clear state.
+    if trade_state is not None:
+        px, r = ex.stop_fill_exit(trade_state)
+        s = trade_state.get("strategy")
+        log.info("🛑 EXIT %s [%s] %s | broker stop filled @ %.2f | %+.2fR | %d bars",
+                 stamp, s.name if s else "?",
+                 "LONG" if trade_state["sign"] > 0 else "SHORT",
+                 px, r, trade_state.get("bars_held", 0))
+        trade_state = None
+
+    # Reconcile: a flat account should have NO resting orders, so cancel any strays
+    # (e.g. a stop bracket orphaned by a market close, a missed exit, or a manual
+    # order). Left alone, a stray could fill into an unmanaged naked position the
+    # bot never opened and never trails.
     stray = c.cancel_orders(ctx.account_id, ctx.contract_id)
     if stray:
         log.warning("🧹 %s  reconcile: cancelled %d stray order(s) while flat",

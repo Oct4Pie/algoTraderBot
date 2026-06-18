@@ -237,6 +237,12 @@ unmanaged position. Each is covered by a test (see [Tests](#tests)):
   manual order). This is the general safety net: it keeps the account in sync even
   if a close-time cancel was missed, and is what stops the naked-position scenario
   above from persisting.
+- **No silent exits.** The common exit is the **resting broker stop** filling
+  intra-bar — which happens at the broker, so `manage_trail` never runs and the
+  close was previously unlogged (a −1R stop-out just vanished from the logs). The
+  bot now detects the in-position→flat transition and logs the exit with its
+  realized R, inferred from the level the stop rested at, so every close is on the
+  record.
 - **ORB session gate.** The 09:30-ET opening range stays mathematically active
   until midnight ET; ORB entries are gated to the RTH window `[~09:45, 16:00)` ET
   (`ORB_CLOSE_MIN`) so the bot doesn't take stale overnight breakouts of the
@@ -333,6 +339,8 @@ and lightweight fakes. Coverage focuses on the order/exit money paths:
   for the contract (and other contracts are untouched)
 - `test_reconcile` — a flat account is swept of stray orders every bar; an
   in-position bar never cancels its live protective stop (mid-session reconcile)
+- `test_stop_fill_exit` — a broker-stop fill (in-position→flat with no bot close)
+  is logged with its realized R, not silently dropped
 - `test_exit_manager` — PPO give-back: activation gate, give-back cap, and the
   intra-bar wick-cross that closes a winner at market instead of riding it back
 - `test_train_live_parity` — the trained sim (`TrailExitSim`) and the live exit

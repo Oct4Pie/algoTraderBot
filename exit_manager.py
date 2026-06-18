@@ -43,6 +43,16 @@ def reconstruct_state(client, account_id, contract_id, pos, strategy) -> dict | 
             "strategy": strategy}
 
 
+def stop_fill_exit(st: dict):
+    """The broker's RESTING stop filled and flattened us (the bot didn't close the
+    trade), so the position is gone before we can manage it. Infer the exit from
+    the level the stop order was resting at — that's where it filled — and return
+    (exit_price, realized_R). For the initial stop this is −1R; for a trailed stop
+    it's the locked-in R."""
+    sign, entry, risk, stop = st["sign"], st["entry"], st["risk"], st["stop"]
+    return float(stop), float(sign * (stop - entry) / risk)
+
+
 def exit_obs(tee, st: dict, bars: pd.DataFrame) -> np.ndarray:
     """Policy observation for the live open position — identical layout to
     TrailExitSim._obs in trail_exit_env.py. Strategy-agnostic: it's purely the
