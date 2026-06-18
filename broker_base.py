@@ -62,6 +62,13 @@ class OrderRouter(ABC):
         """Cancel a working order."""
 
     @abstractmethod
+    def cancel_orders(self, account_id, contract_id) -> int:
+        """Cancel EVERY working order for the contract; return how many. Used to
+        reconcile: a flat account should have no resting orders, so any that
+        remain are strays (e.g. a bracket orphaned by a market close) that could
+        fill into an unmanaged naked position."""
+
+    @abstractmethod
     def close_position(self, account_id, contract_id, price=None) -> dict:
         """Flatten the position at market AND cancel any resting bracket orders
         for the contract (a market close doesn't fire the OCO, so the protective

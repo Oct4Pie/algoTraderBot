@@ -10,7 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 
 _RESTORE = ["SIZE", "RISK_PER_TRADE", "MAX_CONTRACTS", "PROBA_FLOOR",
-            "ACTIVATE_R", "GIVEBACK_R", "ACTIVE_STRATEGIES", "SYMBOL"]
+            "ACTIVATE_R", "GIVEBACK_R", "ACTIVE_STRATEGIES", "SYMBOL",
+            "RR", "USE_PPO_EXIT", "ORB_ADX_GATE", "ORB_CLOSE_MIN"]
 
 
 @pytest.fixture(autouse=True)

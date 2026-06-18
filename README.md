@@ -197,6 +197,31 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
   direction-aware tick-snapped (floor longs / ceil shorts) so rounding never
   lands them on the wrong side.
 
+### Order safety (live)
+
+Trading real orders has sharp edges; these are handled so a desync can't leave an
+unmanaged position. Each is covered by a test (see [Tests](#tests)):
+
+- **Signed bracket ticks.** SL/TP distances are signed relative to the fill — a
+  long's stop is *negative* ticks (below), a short's *positive* (above), TP the
+  mirror — clamped to the 4-tick broker minimum. (Fixes *"Invalid stop loss ticks
+  (57). Ticks should be less than zero when longing."*)
+- **No orphaned brackets.** A market close (`/Position/closeContract`) does **not**
+  fire the OCO, so the broker leaves the protective stop working. `close_position`
+  therefore sweeps and cancels every resting order for the contract — otherwise a
+  stray stop could later fill and open a brand-new **naked** position the bot never
+  opened (seen live: a +0.63R short close left its buy-stop, which filled into a
+  naked long at the exact stop price).
+- **Mid-session reconcile.** A flat account should have no resting orders, so on
+  every flat bar the bot cancels any strays (an orphaned bracket, a missed exit, a
+  manual order). This is the general safety net: it keeps the account in sync even
+  if a close-time cancel was missed, and is what stops the naked-position scenario
+  above from persisting.
+- **ORB session gate.** The 09:30-ET opening range stays mathematically active
+  until midnight ET; ORB entries are gated to the RTH window `[~09:45, 16:00)` ET
+  (`ORB_CLOSE_MIN`) so the bot doesn't take stale overnight breakouts of the
+  morning range.
+
 ## Architecture
 
 Small, single-responsibility modules:
@@ -279,12 +304,17 @@ and lightweight fakes. Coverage focuses on the order/exit money paths:
 - `test_bracket_ticks` — SL/TP ticks signed by direction (the order-rejection fix)
 - `test_close_cancels_brackets` — `close_position` cancels resting brackets so a
   market close can't orphan a stop into a naked position (the naked-position fix)
+- `test_reconcile` — a flat account is swept of stray orders every bar; an
+  in-position bar never cancels its live protective stop (mid-session reconcile)
 - `test_exit_manager` — PPO give-back: activation gate, give-back cap, and the
   intra-bar wick-cross that closes a winner at market instead of riding it back
+- `test_orb_gate` — ORB only fires during the RTH window (no overnight breakouts)
 - `test_position_size` — fixed vs risk-based sizing, cap and 1-lot floor
 - `test_sim_broker` — stop/target/trailing fills and the market-close path
-- `test_e2e_trade` — a full lifecycle through `bot.handle_bar` + the PPO exit:
-  a +2R winner is protected to a profitable exit
+- `test_e2e_trade` — full lifecycles through `backtest.drive` → `bot.handle_bar`
+  (the real driver): long/short give-back winners, stop-out loser, fixed-RR
+  target + stop, the highest-proba resolver, the proba floor, and
+  reconstruct-on-restart
 
 ## Caveats
 

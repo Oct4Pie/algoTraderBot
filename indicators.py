@@ -62,6 +62,12 @@ def _et(bars: pd.DataFrame, tz: str):
     return et.normalize().asi8, (et.hour * 60 + et.minute).to_numpy()
 
 
+def et_minutes(bars: pd.DataFrame, tz: str = "America/New_York"):
+    """Per-bar local time-of-day as minutes from midnight in `tz` (e.g. 09:30 →
+    570). Used to gate session windows."""
+    return _et(bars, tz)[1]
+
+
 def opening_range(bars: pd.DataFrame, orb_bars: int = 5, open_min: int = 570,
                   tz: str = "America/New_York"):
     """Causal opening range → (or_high, or_low). At bar i, the high/low of the

@@ -231,6 +231,26 @@ class TopstepXClient(BrokerClient):
             raise RuntimeError(f"cancel rejected: {r.get('errorMessage', r)}")
         return r
 
+    def cancel_orders(self, account_id: int, contract_id: str) -> int:
+        # Sweep and cancel every working order for the contract. Best-effort: a
+        # failed cancel never raises (callers use this to clean up strays, not as
+        # a critical path).
+        try:
+            orders = self._post("/Order/searchOpen",
+                                {"accountId": account_id}).get("orders", [])
+        except Exception:
+            return 0
+        n = 0
+        for o in orders:
+            if (o.get("contractId") == contract_id
+                    and o.get("status", ORDER_STATUS_WORKING) == ORDER_STATUS_WORKING):
+                try:
+                    self.cancel_order(account_id, o["id"])
+                    n += 1
+                except Exception:
+                    pass            # best-effort
+        return n
+
     def close_position(self, account_id: int, contract_id: str, price=None) -> dict:
         # Flatten the whole position at market. `price` is ignored — the broker
         # fills at market (it's only a fill hint for the backtest sim).
@@ -240,20 +260,9 @@ class TopstepXClient(BrokerClient):
         if not r.get("success"):
             raise RuntimeError(f"close rejected: {r.get('errorMessage', r)}")
         # A market close does NOT fire a bracket leg, so the OCO won't auto-cancel
-        # — sweep and cancel every resting order for this contract so the
-        # protective stop/TP can't orphan and later fill into a NAKED position.
-        try:
-            orders = self._post("/Order/searchOpen",
-                                {"accountId": account_id}).get("orders", [])
-        except Exception:
-            orders = []
-        for o in orders:
-            if (o.get("contractId") == contract_id
-                    and o.get("status", ORDER_STATUS_WORKING) == ORDER_STATUS_WORKING):
-                try:
-                    self.cancel_order(account_id, o["id"])
-                except Exception:
-                    pass            # best-effort — never fail the close itself
+        # — cancel every resting order for this contract so the protective stop/TP
+        # can't orphan and later fill into a NAKED position.
+        self.cancel_orders(account_id, contract_id)
         return r
 
     def _post(self, path: str, payload: dict, auth: bool = True) -> dict:

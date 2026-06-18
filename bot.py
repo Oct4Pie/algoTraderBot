@@ -109,8 +109,17 @@ def handle_bar(ctx: BotContext, bars, trade_state):
                                           trade_state, ctx.trailing)
         return trade_state
 
-    # Flat — detect across strategies (cheap), then grade. Strategies that fire
-    # on this bar share one Chronos embedding (same context) — computed once.
+    # Flat — reconcile first: a flat account should have NO resting orders, so
+    # cancel any strays (e.g. a stop bracket orphaned by a market close, a missed
+    # exit, or a manual order). Left alone, a stray could fill into an unmanaged
+    # naked position the bot never opened and never trails.
+    stray = c.cancel_orders(ctx.account_id, ctx.contract_id)
+    if stray:
+        log.warning("🧹 %s  reconcile: cancelled %d stray order(s) while flat",
+                    stamp, stray)
+
+    # Detect across strategies (cheap), then grade. Strategies that fire on this
+    # bar share one Chronos embedding (same context) — computed once.
     fired = [(s, sig) for s in ctx.strategies if (sig := s.detect(bars))]
     candidates = []
     if fired:

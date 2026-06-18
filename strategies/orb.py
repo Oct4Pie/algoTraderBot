@@ -25,6 +25,9 @@ class OrbStrategy(Strategy):
                                    config.ORB_TZ)
         a = ind.adx(bars, config.ADX_P)
         i = len(c) - 1
+        tmin = ind.et_minutes(bars, config.ORB_TZ)
+        if config.ORB_CLOSE_MIN and tmin[i] >= config.ORB_CLOSE_MIN:
+            return None                                  # past RTH — no stale overnight breakouts
         if config.ORB_ADX_GATE and (not np.isfinite(a[i]) or a[i] < config.ORB_ADX_GATE):
             return None                                  # not a trending regime
         if not (np.isfinite(oh[i]) and np.isfinite(oh[i - 1])):

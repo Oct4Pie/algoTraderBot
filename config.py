@@ -90,6 +90,10 @@ ORB_BARS = 5              # bars in the opening range (5 × 3-min = 15 min)
 ORB_OPEN_MIN = 9 * 60 + 30   # session open = 09:30 in ORB_TZ (minutes from midnight)
 ORB_TZ = "America/New_York"
 ORB_ADX_GATE = 18.0       # only fire ORB breakouts when ADX >= this
+ORB_CLOSE_MIN = 16 * 60   # stop firing ORB breakouts at 16:00 ET — the opening
+#   range stays mathematically "active" until midnight ET, but a 09:30 range is
+#   stale by the evening; gate entries to the RTH session [~09:45, 16:00) ET so
+#   the bot doesn't take low-quality overnight breakouts on the morning range.
 
 # ── models ─────────────────────────────────────────────────────────────
 MODELS_DIR = os.path.join(HERE, "models")

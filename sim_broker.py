@@ -150,6 +150,9 @@ class SimBroker(OrderRouter):
     def cancel_order(self, account_id, order_id):
         return {"success": True}      # no resting broker orders to orphan in the sim
 
+    def cancel_orders(self, account_id, contract_id):
+        return 0                      # the sim has no resting broker orders to sweep
+
     def close_position(self, account_id, contract_id, price=None):
         # Market-close: fill at `price` (the enforced trailed-SL level) if given,
         # else the current bar's close. Records the trade with reason "trail".
