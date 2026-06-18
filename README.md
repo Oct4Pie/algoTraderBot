@@ -196,6 +196,19 @@ YM, GC) and generalize across them; the framework is ticker- and broker-agnostic
   initial −1R stop because every stop-modify was rejected. Stops are also
   direction-aware tick-snapped (floor longs / ceil shorts) so rounding never
   lands them on the wrong side.
+- **Training = live parity.** The policy is trained inside `TrailExitSim`
+  (`trail_exit_env.py`) and run live by `exit_manager.manage_trail`; the two
+  implement the *same* give-back logic — activation gate, peak from the bar's
+  favorable extreme, give-back cap, the intra-bar wick enforcement, **and the
+  `MAX_HOLD` force-exit** (the policy observes `bars_held/MAX_HOLD`, so live force-
+  exits at the same horizon it was trained on). The only accepted difference is
+  fill granularity: live fills per-tick at the broker, the sim at the bar's
+  unfavorable extreme — but that extreme bounds every intra-bar tick, so the
+  bar-resolution decision is identical. Entry and exit are never the same candle:
+  both engines start evaluating exits on the bar *after* entry (entry fills at the
+  signal bar's close). All of this is locked by `tests/test_train_live_parity.py`,
+  which drives the same trade through both engines and asserts an identical exit
+  bar and price.
 
 ### Order safety (live)
 
@@ -315,6 +328,9 @@ and lightweight fakes. Coverage focuses on the order/exit money paths:
   in-position bar never cancels its live protective stop (mid-session reconcile)
 - `test_exit_manager` — PPO give-back: activation gate, give-back cap, and the
   intra-bar wick-cross that closes a winner at market instead of riding it back
+- `test_train_live_parity` — the trained sim (`TrailExitSim`) and the live exit
+  (`manage_trail`) exit on the same bar at the same price (give-back long/short,
+  MAX_HOLD timeout), and never on the entry candle
 - `test_orb_gate` — ORB only fires during the RTH window (no overnight breakouts)
 - `test_indicators` — indicator correctness + strict causality (no look-ahead in
   EMA / Keltner / opening-range / confirmed swings — they feed every feature)

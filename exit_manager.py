@@ -87,63 +87,72 @@ def manage_trail(tee, policy, client, account_id, contract_id, tick_size,
 
     obs = exit_obs(tee, st, bars)                            # obs mfe stays close-based
 
-    # Hold the initial stop until the trade's peak reaches ACTIVATE_R.
+    # Trail only once the peak reaches ACTIVATE_R; until then hold the initial
+    # stop. Either way we fall through to the MAX_HOLD timeout below, so parity
+    # with the training sim (TrailExitSim) holds whether or not we've activated.
     if st["peak_R"] < config.ACTIVATE_R:
         log.info("   %s  armed — peak %.2fR < %.1fR, holding initial stop",
                  stamp, st["peak_R"], config.ACTIVATE_R)
-        return st
-
-    mult = policy.trail_mult(obs)
-    trail_dist = mult * a                                     # price distance
-    giveback = config.GIVEBACK_R * st["risk"]
-    order = client.working_stop_order(account_id, contract_id)
-    if order is None:
-        log.warning("   %s  no working stop found — skip trail", stamp)
-        return st
-
-    if trailing:
-        # Native trailing stop: only ever tighten the follow distance, capped at
-        # the give-back limit (the broker trails tick-by-tick between bars).
-        new_ticks = max(1, round(min(trail_dist, giveback) / tick_size))
-        cur_ticks = st.get("trail_ticks") or new_ticks
-        if new_ticks < cur_ticks:
-            client.modify_trail_price(account_id, order["id"], new_ticks * tick_size)
-            st["trail_ticks"] = new_ticks
-            log.info("   %s  trail tightened → %dt (%.2fx ATR, %d bars in)",
-                     stamp, new_ticks, mult, st["bars_held"])
-        else:
-            log.info("   %s  hold trail %dt (%.2fx ATR)", stamp, cur_ticks, mult)
-        best = st["entry"] + sign * st["peak_R"] * st["risk"]
-        est = best - sign * (st.get("trail_ticks") or new_ticks) * tick_size
-        st["stop"] = max(st["stop"], est) if sign > 0 else min(st["stop"], est)
-        return st
-
-    # Plain stop: PPO trail level, never looser than the give-back cap
-    # (peak − GIVEBACK_R), favorable ratchet only, direction-aware tick snap.
-    peak_price = st["entry"] + sign * st["peak_R"] * st["risk"]
-    cap = peak_price - sign * giveback
-    cand = cur - sign * trail_dist
-    tightest = max(cand, cap) if sign > 0 else min(cand, cap)
-    new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
-    new_stop = _snap(new_stop, sign, tick_size)
-
-    # Enforce the trailed SL: if this bar's UNFAVORABLE extreme crossed it, the
-    # stop is hit — close at market rather than send a (possibly rejected) modify.
-    unfav = lo if sign > 0 else hi
-    if (unfav <= new_stop) if sign > 0 else (unfav >= new_stop):
-        client.close_position(account_id, contract_id, price=new_stop)
-        log.info("   %s  trailed-SL crossed (bar %s=%.2f vs SL %.2f) — closed at market",
-                 stamp, "low" if sign > 0 else "high", unfav, new_stop)
-        return None
-
-    if abs(new_stop - st["stop"]) >= tick_size:
-        try:
-            client.modify_stop_price(account_id, order["id"], new_stop)
-            st["stop"] = new_stop
-            log.info("   %s  trail → stop %.2f (%.2fx ATR, %d bars in)",
-                     stamp, new_stop, mult, st["bars_held"])
-        except Exception as e:        # valid-side reject (e.g. min distance) — wick-cross will enforce
-            log.warning("   %s  stop modify rejected (%s) — holding %.2f", stamp, e, st["stop"])
     else:
-        log.info("   %s  hold (stop %.2f, %.2fx ATR)", stamp, st["stop"], mult)
+        mult = policy.trail_mult(obs)
+        trail_dist = mult * a                                # price distance
+        giveback = config.GIVEBACK_R * st["risk"]
+        order = client.working_stop_order(account_id, contract_id)
+        if order is None:
+            log.warning("   %s  no working stop found — skip trail", stamp)
+        elif trailing:
+            # Native trailing stop: only ever tighten the follow distance, capped
+            # at the give-back limit (the broker trails tick-by-tick between bars).
+            new_ticks = max(1, round(min(trail_dist, giveback) / tick_size))
+            cur_ticks = st.get("trail_ticks") or new_ticks
+            if new_ticks < cur_ticks:
+                client.modify_trail_price(account_id, order["id"], new_ticks * tick_size)
+                st["trail_ticks"] = new_ticks
+                log.info("   %s  trail tightened → %dt (%.2fx ATR, %d bars in)",
+                         stamp, new_ticks, mult, st["bars_held"])
+            else:
+                log.info("   %s  hold trail %dt (%.2fx ATR)", stamp, cur_ticks, mult)
+            best = st["entry"] + sign * st["peak_R"] * st["risk"]
+            est = best - sign * (st.get("trail_ticks") or new_ticks) * tick_size
+            st["stop"] = max(st["stop"], est) if sign > 0 else min(st["stop"], est)
+        else:
+            # Plain stop: PPO trail level, never looser than the give-back cap
+            # (peak − GIVEBACK_R), favorable ratchet only, direction-aware snap.
+            peak_price = st["entry"] + sign * st["peak_R"] * st["risk"]
+            cap = peak_price - sign * giveback
+            cand = cur - sign * trail_dist
+            tightest = max(cand, cap) if sign > 0 else min(cand, cap)
+            new_stop = max(st["stop"], tightest) if sign > 0 else min(st["stop"], tightest)
+            new_stop = _snap(new_stop, sign, tick_size)
+
+            # Enforce the trailed SL: if this bar's UNFAVORABLE extreme crossed it,
+            # the stop is hit — close at market (the resting broker stop may be
+            # stale / wrong-side). Checked BEFORE the timeout so a stop hit takes
+            # precedence, exactly as TrailExitSim does (hit, then `elif` timeout).
+            unfav = lo if sign > 0 else hi
+            if (unfav <= new_stop) if sign > 0 else (unfav >= new_stop):
+                client.close_position(account_id, contract_id, price=new_stop)
+                log.info("   %s  trailed-SL crossed (bar %s=%.2f vs SL %.2f) — closed at market",
+                         stamp, "low" if sign > 0 else "high", unfav, new_stop)
+                return None
+            if abs(new_stop - st["stop"]) >= tick_size:
+                try:
+                    client.modify_stop_price(account_id, order["id"], new_stop)
+                    st["stop"] = new_stop
+                    log.info("   %s  trail → stop %.2f (%.2fx ATR, %d bars in)",
+                             stamp, new_stop, mult, st["bars_held"])
+                except Exception as e:    # valid-side reject — wick-cross will enforce
+                    log.warning("   %s  stop modify rejected (%s) — holding %.2f",
+                                stamp, e, st["stop"])
+            else:
+                log.info("   %s  hold (stop %.2f, %.2fx ATR)", stamp, st["stop"], mult)
+
+    # MAX_HOLD force-exit — the policy observes bars_held/MAX_HOLD and the training
+    # sim force-exits at MAX_HOLD, so live MUST too or it rides past the horizon the
+    # policy was trained on. Close at market (≈ the bar close, like TrailExitSim).
+    if st["bars_held"] >= tee.MAX_HOLD:
+        client.close_position(account_id, contract_id, price=cur)
+        log.info("   %s  max-hold %d bars reached — closed at market %.2f",
+                 stamp, tee.MAX_HOLD, cur)
+        return None
     return st

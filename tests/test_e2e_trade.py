@@ -90,6 +90,22 @@ def test_long_giveback_winner_is_protected(monkeypatch):
     assert t.direction == 1 and t.r >= 1.0       # +2R winner not given back to a loss
 
 
+def test_entry_and_exit_are_different_candles(monkeypatch):
+    # the driver runs process_exits BEFORE entry each bar, so the entry candle is
+    # never exit-checked: every trade's exit must be a strictly later candle.
+    closes = [100.0] * 17 + [104, 108, 112, 116, 120, 116, 110, 104, 100, 98]
+    trades = _run(monkeypatch, closes, [FakeStrategy("long", +1)], policy=FakePolicy())
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.entry_time < t.exit_time           # not the same candle
+
+
+def test_stop_out_also_exits_on_a_later_candle(monkeypatch):
+    closes = [100.0] * 17 + [97, 92, 86, 84, 84]
+    trades = _run(monkeypatch, closes, [FakeStrategy("long", +1)], policy=FakePolicy())
+    assert trades and trades[0].entry_time < trades[0].exit_time
+
+
 def test_short_giveback_winner_is_protected(monkeypatch):
     closes = [100.0] * 17 + [96, 92, 88, 84, 80, 84, 90, 96, 100, 102]
     trades = _run(monkeypatch, closes, [FakeStrategy("short", -1)], policy=FakePolicy())
