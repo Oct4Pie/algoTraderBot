@@ -267,6 +267,25 @@ exit is strategy-agnostic (it only sees the trade's R-state), so the same policy
 serves every strategy. The printed holdout table is the source of truth for
 current performance.
 
+## Tests
+
+```bash
+pytest tests/                         # unit + end-to-end, ~1s
+```
+
+No network, broker, or Chronos needed — everything runs against the `SimBroker`
+and lightweight fakes. Coverage focuses on the order/exit money paths:
+
+- `test_bracket_ticks` — SL/TP ticks signed by direction (the order-rejection fix)
+- `test_close_cancels_brackets` — `close_position` cancels resting brackets so a
+  market close can't orphan a stop into a naked position (the naked-position fix)
+- `test_exit_manager` — PPO give-back: activation gate, give-back cap, and the
+  intra-bar wick-cross that closes a winner at market instead of riding it back
+- `test_position_size` — fixed vs risk-based sizing, cap and 1-lot floor
+- `test_sim_broker` — stop/target/trailing fills and the market-close path
+- `test_e2e_trade` — a full lifecycle through `bot.handle_bar` + the PPO exit:
+  a +2R winner is protected to a profitable exit
+
 ## Caveats
 
 - **Scope**: entry models are trained on NQ/ES/RTY/YM/GC 3-min UTC bars and

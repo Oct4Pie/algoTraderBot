@@ -11,3 +11,5 @@ futures_foundation @ git+https://github.com/johnamcruz/Futures-Foundation-Model.
 # PPO trailing exit (training only — the live bot runs the policy in pure numpy).
 gymnasium>=0.29
 stable-baselines3>=2.0
+# Tests (pytest tests/) — unit + e2e, no network/broker/Chronos needed.
+pytest>=7.0
