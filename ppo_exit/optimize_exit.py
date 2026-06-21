@@ -133,6 +133,13 @@ def main():
                     help="grade entries and keep proba>=this (0 = all flips, no grading)")
     ap.add_argument("--objective", default="meanR",
                     choices=["meanR", "pf", "sumR"])
+    # search bounds (widen STOP_ATR for noisier timeframes like 1-min)
+    ap.add_argument("--stop-min", type=float, default=0.4)
+    ap.add_argument("--stop-max", type=float, default=1.0)
+    ap.add_argument("--activate-min", type=float, default=1.0)
+    ap.add_argument("--activate-max", type=float, default=3.0)
+    ap.add_argument("--giveback-min", type=float, default=0.25)
+    ap.add_argument("--giveback-max", type=float, default=1.5)
     ap.add_argument("--scan-mults", action="store_true",
                     help="evaluate every trail mult (slower; only matters when the "
                          "give-back cap doesn't bind)")
@@ -159,9 +166,12 @@ def main():
     base_cfg = (config.ACTIVATE_R, config.GIVEBACK_R, config.STOP_ATR)
 
     def objective(trial):
-        config.ACTIVATE_R = trial.suggest_float("ACTIVATE_R", 1.0, 3.0, step=0.25)
-        config.GIVEBACK_R = trial.suggest_float("GIVEBACK_R", 0.25, 1.5, step=0.25)
-        config.STOP_ATR = trial.suggest_float("STOP_ATR", 0.4, 1.0, step=0.1)
+        config.ACTIVATE_R = trial.suggest_float("ACTIVATE_R", args.activate_min,
+                                                args.activate_max, step=0.25)
+        config.GIVEBACK_R = trial.suggest_float("GIVEBACK_R", args.giveback_min,
+                                                args.giveback_max, step=0.25)
+        config.STOP_ATR = trial.suggest_float("STOP_ATR", args.stop_min,
+                                              args.stop_max, step=0.1)
         return _score(datasets, "val", args.scan_mults, args.objective)
 
     study = optuna.create_study(direction="maximize",
@@ -190,7 +200,7 @@ def main():
     if args.save and improved:
         _save_config(args.timeframe, best)
         print(f"\n✅ saved → exit_configs.json[\"{args.timeframe}\"] (beats current on "
-              f"test {args.objective}). Retrain: python train_ppo_exit.py "
+              f"test {args.objective}). Retrain: python -m ppo_exit.train_ppo_exit "
               f"--timeframe {args.timeframe}")
     elif args.save:
         print(f"\n⚠️  NOT saved — best doesn't beat the current config on test "
