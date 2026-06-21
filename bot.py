@@ -183,6 +183,9 @@ def handle_bar(ctx: BotContext, bars, trade_state):
 
 def run():
     """Live trading loop against the configured broker."""
+    if config.TIMEFRAME_MIN != config.TRAINED_TIMEFRAME_MIN:
+        log.warning("⚠️  models/PPO are trained on %d-min bars; %d-min is out of distribution",
+                    config.TRAINED_TIMEFRAME_MIN, config.TIMEFRAME_MIN)
     client = make_broker()
     client.authenticate()
     acct = client.pick_account(config.ACCOUNT)
@@ -246,7 +249,11 @@ if __name__ == "__main__":
     ap.add_argument("--backtest", action="store_true",
                     help="simulate over a local CSV (no API calls)")
     ap.add_argument("--symbol", default=config.SYMBOL,
-                    help="backtest symbol (uses data/<symbol>_3min.csv)")
+                    help="backtest symbol (uses data/<symbol>_<timeframe>min.csv)")
+    ap.add_argument("--timeframe", type=int, default=None, metavar="MIN",
+                    help="bar interval in minutes (default %d). NOTE: the entry "
+                         "models and PPO exit are trained on 3-min bars, so other "
+                         "values are out of distribution." % config.TIMEFRAME_MIN)
     ap.add_argument("--strategy", nargs="+", metavar="NAME",
                     choices=list(strat.REGISTRY),
                     help="strategies to run: %(choices)s "
@@ -273,6 +280,10 @@ if __name__ == "__main__":
 
     if args.size is not None and args.risk is not None:
         raise SystemExit("use either --size or --risk, not both")
+    if args.timeframe is not None:
+        if args.timeframe < 1:
+            raise SystemExit("--timeframe must be >= 1 (minutes)")
+        config.TIMEFRAME_MIN = args.timeframe
     if args.strategy:
         config.ACTIVE_STRATEGIES = args.strategy
     if args.proba_floor is not None:

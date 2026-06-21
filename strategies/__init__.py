@@ -6,6 +6,8 @@
         sig = s.detect(bars)            # mechanical entry on the last bar
         if sig: proba, r_hat = s.grade(bars, sig)
 """
+import os
+
 import config
 from strategies.base import Signal, Strategy, embed_context
 from strategies.bos import BosStrategy
@@ -27,12 +29,28 @@ __all__ = ["Signal", "Strategy", "embed_context", "SuperTrendStrategy",
            "OrbStrategy", "REGISTRY", "make_strategies"]
 
 
+def available_for_timeframe():
+    """Strategy names that have a model for the active timeframe (config.TIMEFRAME_MIN)."""
+    return [n for n, cls in REGISTRY.items() if cls().has_model()]
+
+
 def make_strategies(active=None):
-    """Instantiate the active strategies (default: config.ACTIVE_STRATEGIES)."""
+    """Instantiate the active strategies (default: config.ACTIVE_STRATEGIES).
+
+    Only strategies with a model for the active timeframe are allowed — there's no
+    cross-timeframe fallback (a 3-min model is not run on 1-min bars). Requesting
+    one without a matching-timeframe model is a hard error."""
     active = active if active is not None else config.ACTIVE_STRATEGIES
     out = []
     for name in active:
         if name not in REGISTRY:
             raise ValueError(f"unknown strategy {name!r} (have {list(REGISTRY)})")
-        out.append(REGISTRY[name]())
+        s = REGISTRY[name]()
+        if not s.has_model():
+            raise SystemExit(
+                f"strategy {name!r} has no {config.TIMEFRAME_MIN}-min model "
+                f"({os.path.basename(s.model_path())} not found). "
+                f"Available for {config.TIMEFRAME_MIN}-min: "
+                f"{available_for_timeframe() or 'none'}")
+        out.append(s)
     return out

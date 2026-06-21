@@ -141,11 +141,30 @@ class Strategy(ABC):
         r_hat = float(risk_head.predict(X)[0]) if risk_head is not None else 0.0
         return proba, r_hat
 
+    def model_path(self) -> str:
+        """The model bundle for the active timeframe. The trained default (3-min)
+        uses the plain filename; any other timeframe REQUIRES a `_<tf>min` variant
+        (e.g. supertrend_chronos_1min.joblib) — no cross-timeframe fallback, so a
+        strategy without a matching-timeframe model is simply unavailable."""
+        fn = self.model_filename
+        if config.TIMEFRAME_MIN != config.TRAINED_TIMEFRAME_MIN:
+            base, ext = os.path.splitext(fn)
+            return os.path.join(config.MODELS_DIR,
+                                f"{base}_{config.TIMEFRAME_MIN}min{ext}")
+        return os.path.join(config.MODELS_DIR, fn)
+
+    def has_model(self) -> bool:
+        """Whether this strategy has a model for the active timeframe."""
+        return os.path.exists(self.model_path())
+
     def _load_bundle(self) -> dict:
         if self._bundle is None:
-            # Importing the chronos subpackage installs the legacy 'pipelines.chronos'
+            # Importing the pipeline subpackage installs the legacy 'pipelines.chronos'
             # pickle-compat alias so older bundles unpickle without their origin repo.
-            import futures_foundation.chronos  # noqa: F401
-            self._bundle = joblib.load(
-                os.path.join(config.MODELS_DIR, self.model_filename))
+            # (chronos was renamed to pipeline — fall back to the old name.)
+            try:
+                import futures_foundation.pipeline  # noqa: F401
+            except ModuleNotFoundError:
+                import futures_foundation.chronos    # noqa: F401
+            self._bundle = joblib.load(self.model_path())
         return self._bundle

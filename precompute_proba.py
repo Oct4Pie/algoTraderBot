@@ -95,7 +95,10 @@ def grade_in_subprocess(csv_path=DATA_CSV, rows=None):
 
 def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
     """proba aligned 1:1 with `catalog` rows. Cached on (data mtime, flips)."""
-    import futures_foundation.chronos  # noqa: F401  (pipelines.chronos shim)
+    try:                                    # pipelines.chronos pickle-compat shim
+        import futures_foundation.pipeline   # noqa: F401  (chronos renamed → pipeline)
+    except ModuleNotFoundError:
+        import futures_foundation.chronos     # noqa: F401
     import joblib
     from futures_foundation import foundation
 

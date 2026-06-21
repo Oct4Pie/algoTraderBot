@@ -94,6 +94,20 @@ several — when more than one fires on a bar, the highest-proba signal wins):
 | `bos` | break of the last confirmed swing (break of structure) |
 | `orb` | 15-min opening-range breakout (09:30 ET), gated to ADX ≥ 18 |
 
+**Timeframe** (`--timeframe MIN`, default 3): the bar interval. Models are
+per-timeframe and there is **no cross-timeframe fallback** — only strategies with a
+model for the chosen interval are allowed, so a 3-min model is never run on 1-min
+bars. Today: **3-min** has all five strategies; **1-min** has `supertrend` only.
+
+```bash
+python bot.py --strategy supertrend --timeframe 1   # 1-min SuperTrend
+python bot.py --strategy ema --timeframe 1           # error: no 1-min ema model
+```
+
+A non-3-min run logs an out-of-distribution warning, loads `data/<symbol>_<tf>min.csv`
+for backtests, and loads the `<model>_<tf>min.joblib` bundle (e.g.
+`supertrend_chronos_1min.joblib`).
+
 On startup the bot prints your tradable accounts and a banner —
 `✅ <account> | <contract> | 3-min | [ema] | conf≥0.35 | exit: PPO stop-reprice |
 size: fixed 1`. **Confirm it picked your practice/eval account.** From there,
@@ -141,7 +155,7 @@ python bot.py --backtest --symbol MNQ --start 2026-05-01 --end 2026-06-01
 python bot.py --backtest --symbol ES --risk 500
 ```
 
-- `--symbol` reads `data/<symbol>_3min.csv` (ships with NQ, ES, RTY, YM, GC);
+- `--symbol` reads `data/<symbol>_<timeframe>min.csv` (ships with NQ, ES, RTY, YM, GC at 3-min);
   **micros use their parent's bars** (MNQ → NQ) at the micro's tick value.
 - `--start` / `--end` are `YYYY-MM-DD` (**start inclusive, end exclusive**); omit
   either to run from the warmup point / to the end of the file.
