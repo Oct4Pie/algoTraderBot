@@ -104,9 +104,12 @@ python bot.py --strategy supertrend --timeframe 1   # 1-min SuperTrend
 python bot.py --strategy ema --timeframe 1           # error: no 1-min ema model
 ```
 
-A non-3-min run logs an out-of-distribution warning, loads `data/<symbol>_<tf>min.csv`
-for backtests, and loads the `<model>_<tf>min.joblib` bundle (e.g.
-`supertrend_chronos_1min.joblib`).
+A non-3-min run loads `data/<symbol>_<tf>min.csv` for backtests and the
+`<model>_<tf>min.joblib` entry bundle (e.g. `supertrend_chronos_1min.joblib`). The
+PPO exit is per-timeframe too — if no policy exists for the chosen timeframe yet,
+the bot **flags it and trains one automatically** (`train_ppo_exit --timeframe <tf>`,
+run once in a subprocess) before trading; it falls back to the fixed-RR exit only if
+that training can't produce a policy.
 
 On startup the bot prints your tradable accounts and a banner —
 `✅ <account> | <contract> | 3-min | [ema] | conf≥0.35 | exit: PPO stop-reprice |

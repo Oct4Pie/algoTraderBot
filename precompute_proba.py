@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -26,8 +27,26 @@ from trail_exit_env import build_arrays, build_catalog
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, "data", "NQ_3min.csv")
-CACHE = os.path.join(HERE, "proba_cache.npz")
-SUPERTREND_MODEL = os.path.join(config.MODELS_DIR, "supertrend_chronos.joblib")
+
+
+def _tf_suffix() -> str:
+    return "" if config.TIMEFRAME_MIN == config.TRAINED_TIMEFRAME_MIN \
+        else f"_{config.TIMEFRAME_MIN}min"
+
+
+def _cache_path() -> str:
+    # per-timeframe cache so 1-min and 3-min grades never collide
+    return os.path.join(HERE, f"proba_cache{_tf_suffix()}.npz")
+
+
+def _supertrend_model() -> str:
+    # the SuperTrend entry model for the active timeframe (matches the bot)
+    return os.path.join(config.MODELS_DIR, f"supertrend_chronos{_tf_suffix()}.joblib")
+
+
+def _tf_from_csv(csv_path: str) -> int:
+    m = re.search(r"_(\d+)min\.csv$", os.path.basename(csv_path))
+    return int(m.group(1)) if m else config.TRAINED_TIMEFRAME_MIN
 
 with open(config.FFM_COLUMNS_PATH) as _f:
     _FFM_COLS = json.load(_f)
@@ -72,10 +91,11 @@ def _key(csv_path, flip_idx):
     return h.hexdigest()
 
 
-def read_cache(df, catalog, csv_path=DATA_CSV, cache=CACHE):
+def read_cache(df, catalog, csv_path=DATA_CSV, cache=None):
     """Numpy-only cache read (no xgboost/torch import). Returns the cached proba
     aligned to `catalog`, or None if absent / stale. Used by train_ppo_exit so
     its torch process never loads xgboost (they segfault together on macOS)."""
+    cache = cache or _cache_path()
     if not os.path.exists(cache):
         return None
     z = np.load(cache, allow_pickle=True)
@@ -93,7 +113,7 @@ def grade_in_subprocess(csv_path=DATA_CSV, rows=None):
     subprocess.run(cmd, check=True)
 
 
-def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
+def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=None):
     """proba aligned 1:1 with `catalog` rows. Cached on (data mtime, flips)."""
     try:                                    # pipelines.chronos pickle-compat shim
         import futures_foundation.pipeline   # noqa: F401  (chronos renamed → pipeline)
@@ -102,6 +122,7 @@ def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
     import joblib
     from futures_foundation import foundation
 
+    cache = cache or _cache_path()
     flip_idx = catalog[:, 0]
     key = _key(csv_path, flip_idx)
     if os.path.exists(cache):
@@ -109,12 +130,13 @@ def proba_for_catalog(df, catalog, csv_path=DATA_CSV, cache=CACHE):
         if str(z["key"]) == key:
             return z["proba"]
 
-    print(f"▶ grading {len(flip_idx)} flips (batched embeddings)…")
+    print(f"▶ grading {len(flip_idx)} flips with {os.path.basename(_supertrend_model())} "
+          f"(batched embeddings)…")
     closes = df["close"].to_numpy(float)
     emb = foundation.embed_bars(closes, list(flip_idx), ctx=config.CTX)  # (N,256)
     hand = _hand_all(df, flip_idx)                                       # (N,78)
     X = np.concatenate([emb, hand], axis=1).astype(np.float32)
-    bundle = joblib.load(SUPERTREND_MODEL)
+    bundle = joblib.load(_supertrend_model())
     proba = bundle["signal_head"].predict_proba(X)[:, 1].astype(np.float32)
 
     np.savez(cache, key=key, proba=proba)
@@ -128,6 +150,7 @@ def main():
     ap.add_argument("--rows", type=int, default=0,
                     help="grade only the first N bars (matches train --quick)")
     args = ap.parse_args()
+    config.TIMEFRAME_MIN = _tf_from_csv(args.csv)   # pick the matching model + cache
     df = pd.read_csv(args.csv)
     if args.rows:
         df = df.iloc[:args.rows].reset_index(drop=True)

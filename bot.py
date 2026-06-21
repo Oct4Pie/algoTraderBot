@@ -32,6 +32,35 @@ from logsetup import get_logger
 log = get_logger()
 
 
+def ensure_exit_policy():
+    """The PPO exit policy for the active timeframe, training one if it's missing.
+
+    With USE_PPO_EXIT on and no policy for this timeframe, FLAG it and run
+    train_ppo_exit for that timeframe — in a SUBPROCESS, so torch/SB3 never load
+    next to xgboost in the trading process (they segfault together on macOS).
+    Returns the policy path, or None if PPO exit is off or the train produced
+    nothing (the bot then falls back to the fixed-RR bracket exit)."""
+    if not config.USE_PPO_EXIT:
+        return None
+    path = config.policy_path()
+    if os.path.exists(path):
+        return path
+    log.warning("⚠️  no PPO exit policy for %d-min (%s missing) — training one now "
+                "(one-time per timeframe; runs train_ppo_exit)…",
+                config.TIMEFRAME_MIN, os.path.basename(path))
+    import subprocess
+    import sys
+    r = subprocess.run([sys.executable, os.path.join(config.HERE, "train_ppo_exit.py"),
+                        "--timeframe", str(config.TIMEFRAME_MIN)])
+    if r.returncode != 0 or not os.path.exists(path):
+        log.warning("⚠️  could not train a %d-min PPO policy — falling back to the "
+                    "fixed %sR exit", config.TIMEFRAME_MIN, config.RR)
+        return None
+    log.info("✅ trained PPO exit for %d-min → %s",
+             config.TIMEFRAME_MIN, os.path.basename(path))
+    return path
+
+
 class BotContext:
     """Everything a bar needs: the broker (live or simulated), the active
     strategies, the PPO policy, and the trade identifiers. Shared by the live
@@ -49,8 +78,9 @@ class BotContext:
         self.tee = tee
         self.strategies = strat.make_strategies()
         self.policy = None
-        if config.USE_PPO_EXIT and os.path.exists(config.POLICY_PATH):
-            self.policy = tee.NumpyMlpPolicy.load(config.POLICY_PATH)
+        pol = ensure_exit_policy()
+        if pol:
+            self.policy = tee.NumpyMlpPolicy.load(pol)
         self.trailing = bool(self.policy) and config.USE_TRAILING_STOP
 
     @property
@@ -183,9 +213,6 @@ def handle_bar(ctx: BotContext, bars, trade_state):
 
 def run():
     """Live trading loop against the configured broker."""
-    if config.TIMEFRAME_MIN != config.TRAINED_TIMEFRAME_MIN:
-        log.warning("⚠️  models/PPO are trained on %d-min bars; %d-min is out of distribution",
-                    config.TRAINED_TIMEFRAME_MIN, config.TIMEFRAME_MIN)
     client = make_broker()
     client.authenticate()
     acct = client.pick_account(config.ACCOUNT)
@@ -236,9 +263,10 @@ def _retrain_exit(quick: bool, timesteps: int):
     """Retrain the PPO trailing-exit policy (delegates to train_ppo_exit)."""
     import sys
     import train_ppo_exit
-    sys.argv = ["train_ppo_exit.py"] + (
-        ["--quick"] if quick else ["--timesteps", str(timesteps)])
-    log.info("retraining PPO exit (%s)…", "quick" if quick else f"{timesteps} steps")
+    sys.argv = (["train_ppo_exit.py", "--timeframe", str(config.TIMEFRAME_MIN)]
+                + (["--quick"] if quick else ["--timesteps", str(timesteps)]))
+    log.info("retraining PPO exit for %d-min (%s)…", config.TIMEFRAME_MIN,
+             "quick" if quick else f"{timesteps} steps")
     train_ppo_exit.main()
 
 

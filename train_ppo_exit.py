@@ -124,8 +124,14 @@ def export_policy(model, path):
 # ── main ───────────────────────────────────────────────────────────────
 
 def main():
+    import config
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", default=DATA_CSV)
+    ap.add_argument("--timeframe", type=int, default=config.TRAINED_TIMEFRAME_MIN,
+                    help="bar interval to train for (default %(default)s). Reads "
+                         "data/NQ_<tf>min.csv, grades with the <tf>-min SuperTrend "
+                         "model, and writes ppo_trail_exit[_<tf>min].npz")
+    ap.add_argument("--csv", default=None,
+                    help="override the data file (default data/NQ_<timeframe>min.csv)")
     ap.add_argument("--timesteps", type=int, default=400_000)
     ap.add_argument("--quick", action="store_true",
                     help="20k steps on a slice — just proves the pipeline")
@@ -135,10 +141,16 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
+    config.TIMEFRAME_MIN = args.timeframe          # pick model/data/policy for this tf
+    csv = args.csv or os.path.join(HERE, "data", f"NQ_{args.timeframe}min.csv")
+    suffix = "" if args.timeframe == config.TRAINED_TIMEFRAME_MIN else f"_{args.timeframe}min"
+    out_npz = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}.npz")
+    sb3_zip = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}_sb3.zip")
+
     from stable_baselines3 import PPO
 
-    print(f"▶ loading {args.csv}")
-    df = pd.read_csv(args.csv)
+    print(f"▶ loading {csv}  (timeframe {args.timeframe}-min)")
+    df = pd.read_csv(csv)
     if args.quick:
         df = df.iloc[:60_000].reset_index(drop=True)
     arr = build_arrays(df)
@@ -149,10 +161,10 @@ def main():
     # loads xgboost — they segfault together on macOS.
     if args.proba_floor > 0:
         import precompute_proba as pp
-        proba = pp.read_cache(df, catalog, args.csv)
+        proba = pp.read_cache(df, catalog, csv)
         if proba is None:
-            pp.grade_in_subprocess(args.csv, rows=(60_000 if args.quick else None))
-            proba = pp.read_cache(df, catalog, args.csv)
+            pp.grade_in_subprocess(csv, rows=(60_000 if args.quick else None))
+            proba = pp.read_cache(df, catalog, csv)
         if proba is None:
             raise SystemExit("proba grading failed (see subprocess output)")
         kept = proba >= args.proba_floor
@@ -174,19 +186,20 @@ def main():
     model = PPO("MlpPolicy", env, seed=args.seed, verbose=1,
                 n_steps=2048, batch_size=256, gamma=0.999, ent_coef=0.01)
     model.learn(total_timesteps=timesteps)
-    model.save(SB3_ZIP)
+    model.save(sb3_zip)
 
-    export_policy(model, OUT_NPZ)
+    export_policy(model, out_npz)
 
     # ── benchmark on the unseen holdout ────────────────────────────────
-    policy = NumpyMlpPolicy.load(OUT_NPZ)
+    policy = NumpyMlpPolicy.load(out_npz)
     print("\n── holdout exit comparison (same entries, different exits) ──")
     _report("fixed 2R (current)", eval_fixed_2r(arr, hold_cat))
     for a in range(N_ACTIONS):
         _report(f"const trail {TRAIL_MULTS[a]:.2f}x ATR",
                 eval_policy(arr, hold_cat, lambda o, a=a: a))
     _report("PPO trailing exit", eval_policy(arr, hold_cat, policy.action))
-    print("\nDone. The live bot loads ppo_trail_exit.npz automatically.")
+    print(f"\nDone. The live bot loads {os.path.basename(out_npz)} "
+          f"on --timeframe {args.timeframe}.")
 
 
 if __name__ == "__main__":

@@ -105,9 +105,6 @@ def run_backtest(symbol="NQ", start=None, end=None):
     if config.base_symbol(symbol) not in config.TRAINED_SYMBOLS:
         log.warning("⚠️  models are trained on %s; %s is out of distribution",
                     "/".join(config.TRAINED_SYMBOLS), symbol)
-    if config.TIMEFRAME_MIN != config.TRAINED_TIMEFRAME_MIN:
-        log.warning("⚠️  models/PPO are trained on %d-min bars; %d-min is out of distribution",
-                    config.TRAINED_TIMEFRAME_MIN, config.TIMEFRAME_MIN)
 
     # Micros trade their parent's bars; set SYMBOL so feature derivation uses the
     # parent instrument, and load the parent's data file.

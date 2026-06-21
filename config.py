@@ -114,6 +114,15 @@ USE_TRAILING_STOP = False
 POLICY_PATH = os.path.join(MODELS_DIR, "rl_trail_exit", "ppo_trail_exit.npz")
 RR = 2.0                    # fixed-R take-profit fallback (no PPO policy)
 
+
+def policy_path():
+    """The PPO policy for the active timeframe: ppo_trail_exit.npz at the trained
+    3-min default, ppo_trail_exit_<tf>min.npz otherwise (e.g. ..._1min.npz). The
+    exit is retrained per timeframe — bar geometry (ATR, MAX_HOLD bars) differs."""
+    base, ext = os.path.splitext(POLICY_PATH)
+    return POLICY_PATH if TIMEFRAME_MIN == TRAINED_TIMEFRAME_MIN \
+        else f"{base}_{TIMEFRAME_MIN}min{ext}"
+
 # Trailing exit shape:
 #   ACTIVATE_R — hold the initial stop (1R = STOP_ATR×ATR) until the trade's peak
 #                reaches this many R; only then start trailing. Lets winners run
