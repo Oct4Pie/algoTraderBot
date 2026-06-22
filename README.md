@@ -93,6 +93,7 @@ several — when more than one fires on a bar, the highest-proba signal wins):
 | `keltner` | Keltner-channel breakout, gated to ADX ≥ 20 |
 | `bos` | break of the last confirmed swing (break of structure) |
 | `orb` | 15-min opening-range breakout (09:30 ET), gated to ADX ≥ 18 |
+| `cisd_ote` | CISD displacement → OTE fib-zone pullback (mean-reversion, ICT/SMC) |
 
 **Timeframe** (`--timeframe MIN`, default 3): the bar interval. Models are
 per-timeframe and there is **no cross-timeframe fallback** — only strategies with a

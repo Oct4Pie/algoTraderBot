@@ -11,6 +11,7 @@ import os
 import config
 from strategies.base import Signal, Strategy, embed_context
 from strategies.bos import BosStrategy
+from strategies.cisd_ote import CisdOteStrategy
 from strategies.ema_cross import EmaCrossStrategy
 from strategies.keltner import KeltnerAdxStrategy
 from strategies.orb import OrbStrategy
@@ -22,11 +23,12 @@ REGISTRY = {
     KeltnerAdxStrategy.name: KeltnerAdxStrategy,
     BosStrategy.name: BosStrategy,
     OrbStrategy.name: OrbStrategy,
+    CisdOteStrategy.name: CisdOteStrategy,
 }
 
 __all__ = ["Signal", "Strategy", "embed_context", "SuperTrendStrategy",
            "EmaCrossStrategy", "KeltnerAdxStrategy", "BosStrategy",
-           "OrbStrategy", "REGISTRY", "make_strategies"]
+           "OrbStrategy", "CisdOteStrategy", "REGISTRY", "make_strategies"]
 
 
 def available_for_timeframe():
