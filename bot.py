@@ -13,7 +13,8 @@ Strategies and exit behaviour are configured in config.py / .env. Run:
     pip install -r requirements.txt
     cp .env.example .env          # then fill in your TopstepX credentials
     python bot.py                 # live (places LIVE orders)
-    python bot.py --backtest --symbol NQ --start 2026-01-01 --end 2026-03-01
+    python bot.py --backtest --allow-in-sample --symbol NQ \
+        --start 2026-01-01 --end 2026-03-01
     python bot.py --retrain-exit  # retrain the PPO trailing exit
 
 ⚠️  EDUCATIONAL — live mode places LIVE orders. Run it on a practice/evaluation
@@ -28,6 +29,7 @@ from ppo_exit import exit_manager as ex
 import strategies as strat
 from broker import SIDE, make_broker
 from logsetup import get_logger
+from research_validation import policy_is_leak_safe
 
 log = get_logger()
 
@@ -43,8 +45,17 @@ def ensure_exit_policy():
     if not config.USE_PPO_EXIT:
         return None
     path = config.policy_path()
+    expected_config = {"ACTIVATE_R": config.ACTIVATE_R,
+                       "GIVEBACK_R": config.GIVEBACK_R,
+                       "STOP_ATR": config.STOP_ATR}
     if os.path.exists(path):
-        return path
+        if policy_is_leak_safe(path, expected_config):
+            return path
+        log.warning("⚠️  refusing legacy/unsafe PPO policy %s: missing or invalid "
+                    "purged-training provenance. Retrain explicitly with "
+                    "--retrain-exit; using fixed %sR exit until then",
+                    os.path.basename(path), config.RR)
+        return None
     log.warning("⚠️  no PPO exit policy for %d-min (%s missing) — training one now "
                 "(one-time per timeframe; runs train_ppo_exit)…",
                 config.TIMEFRAME_MIN, os.path.basename(path))
@@ -52,7 +63,8 @@ def ensure_exit_policy():
     import sys
     r = subprocess.run([sys.executable, "-m", "ppo_exit.train_ppo_exit",
                         "--timeframe", str(config.TIMEFRAME_MIN)], cwd=config.HERE)
-    if r.returncode != 0 or not os.path.exists(path):
+    if (r.returncode != 0 or not os.path.exists(path)
+            or not policy_is_leak_safe(path, expected_config)):
         log.warning("⚠️  could not train a %d-min PPO policy — falling back to the "
                     "fixed %sR exit", config.TIMEFRAME_MIN, config.RR)
         return None
@@ -288,6 +300,9 @@ if __name__ == "__main__":
                          "(overrides config.ACTIVE_STRATEGIES)")
     ap.add_argument("--start", help="backtest start date (YYYY-MM-DD, inclusive)")
     ap.add_argument("--end", help="backtest end date (YYYY-MM-DD, exclusive)")
+    ap.add_argument("--allow-in-sample", action="store_true",
+                    help="RESEARCH ONLY: permit a backtest overlapping model "
+                         "training/inspected holdout data; never treat it as OOS")
     ap.add_argument("--size", type=int,
                     help="fixed contracts per trade (overrides config.SIZE)")
     ap.add_argument("--risk", type=float,
@@ -337,7 +352,8 @@ if __name__ == "__main__":
 
     if args.backtest:
         import backtest
-        backtest.run_backtest(symbol=args.symbol, start=args.start, end=args.end)
+        backtest.run_backtest(symbol=args.symbol, start=args.start, end=args.end,
+                              allow_in_sample=args.allow_in_sample)
         raise SystemExit(0)
 
     if not config.TOPSTEPX_USERNAME or not config.TOPSTEPX_API_KEY:

@@ -33,6 +33,12 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Do not loosen the `xgboost==3.3.0` pin while the shipped FFM heads remain joblib
+pickles. Cross-version verification found prediction parity across 3.1.2–3.3.0,
+matching the artifacts' stored holdout probability scale; versions through 3.0
+materially change scores. Runtime inference fails closed outside the compatible
+3.1+ line instead of silently trading altered models.
+
 > **macOS note:** if you hit a segfault (the torch/xgboost OpenMP clash), prefix
 > commands with `KMP_DUPLICATE_LIB_OK=TRUE`, e.g.
 > `KMP_DUPLICATE_LIB_OK=TRUE python bot.py …`.
@@ -61,15 +67,17 @@ TOPSTEPX_ACCOUNT=                 # blank = first tradable account, or an id/nam
 - Real environment variables (`export TOPSTEPX_API_KEY=…`) override `.env` if
   set — handy for CI or secrets managers.
 
-**Verify the install** with a short backtest (uses your creds for the contract
-spec; the first run also downloads the Chronos checkpoint, so give it a minute):
+**Verify the install** with a short research backtest (uses your creds for the
+contract spec; the first run also downloads the Chronos checkpoint, so give it a
+minute). `--allow-in-sample` is required because every shipped bar has already
+been exposed during model development; this proves wiring, **not performance**:
 
 ```bash
-python bot.py --backtest --symbol NQ --start 2026-05-23 --end 2026-05-25
+python bot.py --backtest --allow-in-sample --symbol NQ --start 2026-05-23 --end 2026-05-25
 ```
 
 You should see candles/signals scroll past and a `BACKTEST NQ | trades=… win=…`
-summary at the end. If you get that, you're ready.
+summary at the end. If you get that, the wiring is ready; it says nothing about edge.
 
 ### 4. Run (live)
 
@@ -153,12 +161,24 @@ still looked up from the broker API, so credentials are required.
 
 ```bash
 # one month of NQ
-python bot.py --backtest --symbol NQ --start 2026-05-01 --end 2026-06-01
+python bot.py --backtest --allow-in-sample --symbol NQ --start 2026-05-01 --end 2026-06-01
 
 # a micro and a different ticker
-python bot.py --backtest --symbol MNQ --start 2026-05-01 --end 2026-06-01
-python bot.py --backtest --symbol ES --risk 500
+python bot.py --backtest --allow-in-sample --symbol MNQ --start 2026-05-01 --end 2026-06-01
+python bot.py --backtest --allow-in-sample --symbol ES --risk 500
 ```
+
+**Leakage firewall.** A backtest fails by default when its first tested bar
+overlaps any active model's training span or an already-inspected artifact
+holdout or a consumed certification window. Use `--allow-in-sample` only for
+debugging/strategy development; the banner labels the result
+`RESEARCH/IN-SAMPLE`, and it must not be reported as validation. The canonical
+training CSVs end at the development cutoff (2026-06-04); the local June–July NQ
+certification snapshot has already been consumed. Append later, genuinely
+untouched data before running a backtest without that flag. Such a run is labeled
+`UNSEEN/NOT CERTIFIED`; repeated inspection turns it into validation. Final
+exit-policy certification is the locked one-shot workflow described below; a
+full entry-plus-exit certification still requires a separately frozen forward run.
 
 - `--symbol` reads `data/<symbol>_<timeframe>min.csv` (ships with NQ, ES, RTY, YM, GC at 3-min);
   **micros use their parent's bars** (MNQ → NQ) at the micro's tick value.
@@ -169,7 +189,8 @@ python bot.py --backtest --symbol ES --risk 500
 
 It prints a summary — trades, win rate, mean/sum R, profit factor, plus MFE and
 per-strategy / per-exit breakdowns — and writes every trade to
-`log/backtest_<symbol>.csv`. Entries fill at the signal bar's close; when a bar
+`log/backtest_research_<symbol>.csv` or
+`log/backtest_unseen_uncertified_<symbol>.csv`. Entries fill at the signal bar's close; when a bar
 straddles both stop and target the stop is assumed first. Grading embeds each
 signal through Chronos, so longer ranges take a few minutes.
 
@@ -279,6 +300,7 @@ Small, single-responsibility modules:
 | `broker.py` | `TopstepXClient` (a `BrokerClient`) over the ProjectX Gateway API + `make_broker()` |
 | `sim_broker.py` | `SimBroker` (an `OrderRouter`) — fills/stops/trailing against a CSV for backtests |
 | `backtest.py` | drives `handle_bar` over history with date-range selection |
+| `research_validation.py` | purged splits, unsafe-filter rejection, artifact exposure/OOS firewall |
 | `indicators.py` | SuperTrend / ATR / ADX / EMA / Keltner / swings / opening range |
 | `embedder.py` / `embed_worker.py` | warm Chronos embedding worker — model loaded once per session |
 | `strategies/` | the pluggable strategies (one file each) + shared base |
@@ -325,18 +347,30 @@ client would just provide the same account / market-data / order methods.
 
 ```bash
 python bot.py --retrain-exit          # full retrain, then exit
-python bot.py --retrain-exit --quick  # fast smoke retrain
+python bot.py --retrain-exit --quick  # fast smoke; writes _quick artifacts, never live policy
 python -m ppo_exit.train_ppo_exit     # same thing, standalone
 ```
 
-Catalogs a representative set of entry points in `data/NQ_3min.csv`, keeps the
-ones the bot would enter (`proba ≥ 0.35`, cached per-timeframe in `ppo_exit/proba_cache*.npz`), simulates
+Catalogs a representative set of entry points in `data/NQ_3min.csv` and simulates
 each trade from the live **0.5×ATR(20) stop** with the `ACTIVATE_R`/`GIVEBACK_R`
 shaping while the agent learns the trail, then benchmarks vs fixed-RR /
 constant-trail baselines and writes the policy into `ppo_exit/policies/`. The
 exit is strategy-agnostic (it only sees the trade's R-state), so the same policy
-serves every strategy. The printed holdout table is the source of truth for
-current performance.
+serves every strategy. Training and reusable validation are chronological and
+separated by an 80-bar purge, so no training episode can consume validation
+prices. The printed table is explicitly **validation**, not final OOS.
+
+The leak-safe default uses every representative flip (`--proba-floor 0`). Do not
+filter historical samples with the shipped entry model: that model was fit on the
+same history, so its scores are not out-of-fold. The old behavior is available
+only behind `--unsafe-final-model-filter`, writes a separate `_unsafe` artifact,
+and cannot be certified.
+
+Each new policy gets a hash-bound `.validation.json` sidecar recording its data
+hash, split, embargo, filter mode, config, seed, and validation metrics. The bot
+refuses a policy without valid purged-training provenance and falls back to fixed
+RR. Consequently, the legacy policies shipped before this firewall are disabled
+until explicitly retrained with `python bot.py --retrain-exit`.
 
 ### Tune the exit config (Optuna)
 
@@ -349,14 +383,39 @@ python -m ppo_exit.optimize_exit --timeframe 1 --tickers NQ ES RTY YM GC --trial
 ```
 
 It replays the exact give-back sim (`TrailExitSim`) per config — no PPO retrain per
-trial — scoring expectancy on a **validation** slice and reporting the winner on a
-held-out **test** slice, so the chosen config isn't overfit to one window. Pool
+trial — scoring expectancy on a purged **validation** slice. Test outcomes are
+never read during tuning, and `--save` is controlled only by validation. All
+existing pre-cutoff history is treated as development data, not relabeled as a
+fresh test. Pool
 multiple tickers with `--tickers` for more data. It prints the best
-`ACTIVATE_R`/`GIVEBACK_R`/`STOP_ATR` (and whether it beats the current config on
-test); with `--save` it writes the winner to that timeframe's entry in
+`ACTIVATE_R`/`GIVEBACK_R`/`STOP_ATR`; with `--save` it writes the validation
+winner to that timeframe's entry in
 `ppo_exit/exit_configs.json`. Then retrain so the policy matches the new shaping:
 `python -m ppo_exit.train_ppo_exit --timeframe <tf>`. (1-min CSVs are local-only —
 see Backtest.)
+
+Final **exit-policy** certification is a separate, parameter-read-only operation. It requires
+fresh data after the cutoff recorded in `ppo_exit/validation_protocol.json`, a
+minimum population before outcomes are evaluated, and writes an immutable report
+keyed by protocol and timeframe. Keep fresh bars separate from the frozen training
+CSV under a directory containing `<symbol>_<timeframe>min.csv`; the certification
+loader appends them only in memory for indicator warmup and hashes both inputs.
+Only one final look is allowed per protocol; retrying with a shifted date, ticker
+subset, or configuration is refused:
+
+```bash
+python -m ppo_exit.optimize_exit --timeframe 3 --tickers NQ \
+  --certify --test-start 2026-06-05 --fresh-data-dir data/certification
+```
+
+Do not run that command until the configuration is frozen and enough untouched
+post-cutoff data has accumulated. This certifies the exit policy on representative
+mechanical entries; it does not certify the booster-filtered full trading stack.
+Protocol 1 has now consumed NQ data through 2026-07-10 and will refuse another
+look. Its frozen report is
+`ppo_exit/certifications/exit_policy_protocol1_3min.json`: PPO meanR −0.00117,
+PF 0.998, sumR −0.38 over 325 entries, exactly matching the deterministic 1×ATR
+reference. That is a flat result, not evidence of an exit edge.
 
 **Per-timeframe configs.** `ppo_exit/exit_configs.json` holds the exit shaping
 (`ACTIVATE_R`/`GIVEBACK_R`/`STOP_ATR`) **keyed by timeframe** — 1-min and 3-min
@@ -415,13 +474,24 @@ and lightweight fakes. Coverage focuses on the order/exit money paths:
   (and fall back to fixed-RR if training can't produce one)
 - `test_exit_configs` — per-timeframe exit config load/save (`exit_configs.json`)
 - `test_optimize_exit` — the Optuna scanner's metric/split math and that the
-  give-back replay is genuinely sensitive to each config knob
+  give-back replay is genuinely sensitive to each config knob; validation is
+  outcome-horizon purged and certification is one-shot
+- `test_research_validation` — full-horizon embargoes, final-model probability
+  filter rejection, inspected-holdout boundaries, strict OOS backtest blocking,
+  and the fresh-data certification cutoff
 
 ## Caveats
 
 - **Scope**: entry models are trained on NQ/ES/RTY/YM/GC 3-min UTC bars and
   generalize across them; other tickers/timeframes are out of distribution until
   retrained.
+- **Certification status**: every canonical training bar through 2026-06-04 was
+  used or inspected during development. Protocol 1 then consumed NQ through
+  2026-07-10 for the exit-policy-only result above. The booster-filtered full
+  trading stack remains **uncertified**, and neither the validation nor the flat
+  exit certificate demonstrates trading edge. Passing unit tests proves
+  implementation invariants, not profitability. A new honest evaluation now
+  requires data strictly after 2026-07-10 and a deliberately versioned protocol.
 - **Feature fidelity**: 68 of 76 FFM features are computed live; the 8
   session/time columns the current library doesn't emit are left NaN (XGBoost
   handles missing natively) — faithful but not bit-identical to training.

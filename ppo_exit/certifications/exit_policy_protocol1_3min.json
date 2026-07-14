@@ -1,0 +1,51 @@
+{
+  "protocol": 1,
+  "kind": "one-shot fresh-data exit-policy certification",
+  "timeframe_min": 3,
+  "tickers": [
+    "NQ"
+  ],
+  "test_start": "2026-06-05T00:00:00+00:00",
+  "test_data_through": "2026-07-10T20:57:00+00:00",
+  "coverage": {
+    "NQ": {
+      "data_first": "2021-04-25T22:00:00+00:00",
+      "data_last": "2026-07-10T20:57:00+00:00",
+      "test_entries": 325,
+      "first_test_entry": "2026-06-05T01:51:00+00:00",
+      "last_test_entry": "2026-07-10T15:27:00+00:00"
+    }
+  },
+  "embargo_bars": 80,
+  "config": {
+    "ACTIVATE_R": 2.0,
+    "GIVEBACK_R": 0.75,
+    "STOP_ATR": 0.5
+  },
+  "data_sha256": {
+    "NQ": {
+      "training_context": "e1d949ef902a6ac37f12e889199dbf475b0325de7b316cbaa64c806a0264ee1f",
+      "fresh_holdout": "0553dca991eacc0d8700f6b2ad7bb8002a140b75aea9ce0681f9705d50f47ae2"
+    }
+  },
+  "policy": {
+    "path": "ppo_exit/policies/ppo_trail_exit.npz",
+    "sha256": "9503beed40c7619c6c64ad6715060c81958c9bc4d90ee3c6061decbfd4c79f9a"
+  },
+  "metrics": {
+    "ppo_policy": {
+      "meanR": -0.0011703196287785344,
+      "wr": 0.30153846153846153,
+      "pf": 0.9983138496382928,
+      "sumR": -0.38035387935302367,
+      "n": 325
+    },
+    "constant_1atr_reference": {
+      "meanR": -0.0011703196287785344,
+      "wr": 0.30153846153846153,
+      "pf": 0.9983138496382928,
+      "sumR": -0.38035387935302367,
+      "n": 325
+    }
+  }
+}

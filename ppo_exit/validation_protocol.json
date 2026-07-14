@@ -1,0 +1,6 @@
+{
+  "protocol_version": 1,
+  "contaminated_through": "2026-06-04T23:57:00+00:00",
+  "episode_embargo_bars": 80,
+  "note": "All data through this timestamp has been used or inspected during model/strategy development. It is validation/research data, not a final test. Certification must use later data exactly once."
+}

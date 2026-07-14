@@ -5,7 +5,8 @@ Drives the exact live per-bar logic (bot.handle_bar) through a simulated broker
 (sim_broker.SimBroker), so entries, grading and the PPO trailing exit behave
 just like live — only fills come from history instead of the broker.
 
-    python bot.py --backtest --symbol NQ --start 2026-01-01 --end 2026-03-01
+    python bot.py --backtest --allow-in-sample --symbol NQ \
+        --start 2026-01-01 --end 2026-03-01
 
 Each bar feeds a trailing window (not the whole history) to keep indicator
 recomputation cheap; the simulated broker fills/exits against the full series.
@@ -16,6 +17,7 @@ import pandas as pd
 
 import config
 from logsetup import LOG_DIR, get_logger
+from research_validation import enforce_unseen_backtest
 from sim_broker import SimBroker
 
 log = get_logger()
@@ -34,7 +36,7 @@ def _load(symbol: str, end) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _summary(trades, symbol):
+def _summary(trades, symbol, validation_label="UNCLASSIFIED"):
     import numpy as np
     if not trades:
         log.info("no trades in range")
@@ -45,8 +47,9 @@ def _summary(trades, symbol):
     pf = wins / losses if losses > 0 else float("inf")
     capture = r.sum() / mfe.sum() if mfe.sum() > 0 else 0.0
     log.info("─" * 60)
-    log.info("BACKTEST %s | trades=%d  win=%.1f%%  meanR=%+.3f  sumR=%+.2f  PF=%.2f",
-             symbol, len(r), 100 * (r > 0).mean(), r.mean(), r.sum(), pf)
+    log.info("BACKTEST %s | %s | trades=%d  win=%.1f%%  meanR=%+.3f  "
+             "sumR=%+.2f  PF=%.2f", symbol, validation_label, len(r),
+             100 * (r > 0).mean(), r.mean(), r.sum(), pf)
     log.info("   MFE: mean=%.2fR  max=%.2fR  | capture (sumR/sumMFE)=%.0f%%  "
              "| biggest trend caught=%.2fR", mfe.mean(), mfe.max(),
              100 * capture, r.max())
@@ -59,7 +62,8 @@ def _summary(trades, symbol):
             rs = np.array(rs)
             log.info("   %-9s %-10s n=%-4d win=%.0f%% meanR=%+.3f sumR=%+.2f",
                      label, name, len(rs), 100 * (rs > 0).mean(), rs.mean(), rs.sum())
-    out = os.path.join(LOG_DIR, f"backtest_{symbol}.csv")
+    kind = "research" if "IN-SAMPLE" in validation_label else "unseen_uncertified"
+    out = os.path.join(LOG_DIR, f"backtest_{kind}_{symbol}.csv")
     os.makedirs(LOG_DIR, exist_ok=True)
     pd.DataFrame([t.__dict__ for t in trades]).to_csv(out, index=False)
     log.info("trades written → %s", os.path.relpath(out, config.HERE))
@@ -99,7 +103,7 @@ def drive(ctx, sim, df, start_idx, window=WINDOW):
     return sim.trades
 
 
-def run_backtest(symbol="NQ", start=None, end=None):
+def run_backtest(symbol="NQ", start=None, end=None, allow_in_sample=False):
     import bot     # imported here to avoid a cycle (bot imports backtest lazily)
 
     if config.base_symbol(symbol) not in config.TRAINED_SYMBOLS:
@@ -122,13 +126,24 @@ def run_backtest(symbol="NQ", start=None, end=None):
         hits = df.index[df["time"] >= ts]
         start_idx = max(WINDOW, int(hits[0]) if len(hits) else len(df))
 
+    if start_idx >= len(df):
+        raise SystemExit("no bars remain in the requested backtest range")
+    contaminated_through = enforce_unseen_backtest(
+        ctx.strategies, df["time"].iloc[start_idx], allow_in_sample)
+    validation_label = ("RESEARCH/IN-SAMPLE" if allow_in_sample
+                        else "UNSEEN/NOT CERTIFIED")
+    if allow_in_sample:
+        log.warning("⚠️  %s backtest — model development data extends through %s; "
+                    "do not report these results as validation",
+                    validation_label, contaminated_through)
+
     names = "+".join(s.name for s in ctx.strategies)
-    log.info("▶ backtest %s [%s] | %s → %s | %d bars | conf≥%.2f | exit: %s",
-             symbol, names,
+    log.info("▶ backtest %s [%s] | %s | %s → %s | %d bars | conf≥%.2f | exit: %s",
+             symbol, names, validation_label,
              start or str(df["time"].iloc[start_idx].date()),
              end or str(df["time"].iloc[-1].date()),
              len(df) - start_idx, config.PROBA_FLOOR, ctx.exit_mode)
 
     trades = drive(ctx, sim, df, start_idx)
-    _summary(trades, symbol)
+    _summary(trades, symbol, validation_label)
     return trades

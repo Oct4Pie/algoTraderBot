@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -28,6 +30,42 @@ import pandas as pd
 
 import config
 import indicators as ind
+
+
+def _install_pickle_compat():
+    """Map legacy model module names to the canonical public package.
+
+    Several shipped bundles predate the ``chronos`` -> ``pipeline`` rename.
+    Newer futures_foundation releases intentionally removed their global aliases,
+    so the consumer must provide them while unpickling its own legacy artifacts.
+    """
+    try:
+        import futures_foundation.pipeline as pipeline
+        import futures_foundation.pipeline.head_xgb as head_xgb
+    except ModuleNotFoundError:
+        return
+    sys.modules.setdefault("futures_foundation.chronos", pipeline)
+    sys.modules.setdefault("futures_foundation.chronos.head_xgb", head_xgb)
+    legacy = sys.modules.setdefault("pipelines", types.ModuleType("pipelines"))
+    if not hasattr(legacy, "__path__"):
+        legacy.__path__ = []
+    sys.modules.setdefault("pipelines.chronos", pipeline)
+    sys.modules.setdefault("pipelines.chronos.head_xgb", head_xgb)
+
+
+def require_xgboost_compat():
+    """Fail closed outside the empirically compatible XGBoost 3.1+ line."""
+    import xgboost
+    try:
+        parts = xgboost.__version__.split(".")
+        version = (int(parts[0]), int(parts[1]))
+    except (AttributeError, TypeError, ValueError) as e:
+        raise RuntimeError("cannot verify XGBoost runtime compatibility") from e
+    if version < (3, 1) or version >= (4, 0):
+        raise RuntimeError(
+            "shipped FFM boosters require xgboost==3.3.0; versions <=3.0 "
+            "materially change probability scores. Reinstall requirements.txt "
+            "before running inference")
 
 # FFM feature columns in the EXACT order the models were trained on (extracted
 # from the training parquet). Live values are placed by name into this order;
@@ -166,5 +204,7 @@ class Strategy(ABC):
                 import futures_foundation.pipeline  # noqa: F401
             except ModuleNotFoundError:
                 import futures_foundation.chronos    # noqa: F401
+            _install_pickle_compat()
+            require_xgboost_compat()
             self._bundle = joblib.load(self.model_path())
         return self._bundle

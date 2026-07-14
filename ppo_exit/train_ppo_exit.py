@@ -13,15 +13,17 @@ entry points to train and benchmark on.
 
 Pipeline:
     1. load NQ 3-min bars, precompute the trail/stop ATR
-    2. catalog SuperTrend flips as trade samples, split train / holdout by time
+    2. catalog SuperTrend flips and make an 80-bar-purged chronological split
     3. PPO learns a trailing-stop tightness policy on the train trades
-    4. benchmark on the holdout vs fixed-2R and constant-trail baselines
+    4. benchmark on reusable validation (never presented as final OOS)
     5. export the policy to ppo_trail_exit.npz (torch-free, for the live bot)
 
 The exported .npz (models/rl_trail_exit/) is what bot.py loads at runtime.
 """
 import argparse
+import datetime as dt
 import os
+import platform
 
 import numpy as np
 import pandas as pd
@@ -30,6 +32,10 @@ from ppo_exit.trail_exit_env import (
     build_arrays, build_catalog, make_env, TrailExitSim,
     NumpyMlpPolicy, TRAIL_MULTS, N_ACTIONS, MAX_HOLD,
 )
+from research_validation import (
+    file_sha256, purged_train_eval_split, require_leak_safe_probability_filter,
+    validation_protocol, write_policy_metadata,
+)
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the ppo_exit package
 REPO = os.path.dirname(HERE)                                # repo root (data lives here)
@@ -37,7 +43,7 @@ DATA_CSV = os.path.join(REPO, "data", "NQ_3min.csv")
 RL_DIR = os.path.join(HERE, "policies")                    # trained policies live in-package
 OUT_NPZ = os.path.join(RL_DIR, "ppo_trail_exit.npz")
 SB3_ZIP = os.path.join(RL_DIR, "ppo_trail_exit_sb3.zip")
-HOLDOUT_FRAC = 0.10            # last 10% of bars, never seen in training
+VALIDATION_FRAC = 0.10         # reusable model-development slice; NOT final OOS
 
 
 # ── evaluation helpers (pure numpy) ────────────────────────────────────
@@ -136,11 +142,16 @@ def main():
     ap.add_argument("--timesteps", type=int, default=400_000)
     ap.add_argument("--quick", action="store_true",
                     help="20k steps on a slice — just proves the pipeline")
-    ap.add_argument("--proba-floor", type=float, default=0.35,
-                    help="train the exit only on flips the bot would enter "
-                         "(proba >= this). 0 disables the filter.")
+    ap.add_argument("--proba-floor", type=float, default=0.0,
+                    help="historical entry-probability filter. Leak-safe default "
+                         "is 0 because shipped-model scores are not out-of-fold")
+    ap.add_argument("--unsafe-final-model-filter", action="store_true",
+                    help="RESEARCH ONLY: allow historical filtering by the final "
+                         "entry model; resulting metrics cannot be certified")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    require_leak_safe_probability_filter(
+        args.proba_floor, args.unsafe_final_model_filter)
 
     config.TIMEFRAME_MIN = args.timeframe          # pick model/data/policy for this tf
     cfg = config.apply_exit_config()               # train on THIS timeframe's exit shaping
@@ -149,9 +160,15 @@ def main():
           f"STOP_ATR={config.STOP_ATR}" + ("" if cfg else "  (defaults — no JSON entry)"))
     csv = args.csv or os.path.join(REPO, "data", f"NQ_{args.timeframe}min.csv")
     suffix = "" if args.timeframe == config.TRAINED_TIMEFRAME_MIN else f"_{args.timeframe}min"
-    out_npz = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}.npz")
-    sb3_zip = os.path.join(RL_DIR, f"ppo_trail_exit{suffix}_sb3.zip")
+    artifact_suffix = suffix
+    if args.quick:
+        artifact_suffix += "_quick"
+    if args.proba_floor > 0:
+        artifact_suffix += "_unsafe"
+    out_npz = os.path.join(RL_DIR, f"ppo_trail_exit{artifact_suffix}.npz")
+    sb3_zip = os.path.join(RL_DIR, f"ppo_trail_exit{artifact_suffix}_sb3.zip")
 
+    import stable_baselines3
     from stable_baselines3 import PPO
 
     print(f"▶ loading {csv}  (timeframe {args.timeframe}-min)")
@@ -177,12 +194,14 @@ def main():
               f"{len(catalog)} flips (the bot's real entries)")
         catalog = catalog[kept]
 
-    # time-based split: train on the early bars, hold out the last fraction
-    cut = int(len(df) * (1 - HOLDOUT_FRAC))
-    train_cat = catalog[catalog[:, 0] < cut]
-    hold_cat = catalog[catalog[:, 0] >= cut]
+    # Chronology alone is insufficient: an entry can consume MAX_HOLD future
+    # bars. Purge the train tail so no episode reaches the validation partition.
+    cut = int(len(df) * (1 - VALIDATION_FRAC))
+    train_cat, val_cat = purged_train_eval_split(catalog, cut, MAX_HOLD)
     print(f"  flips: {len(catalog)} total | {len(train_cat)} train | "
-          f"{len(hold_cat)} holdout")
+          f"{len(val_cat)} validation | embargo={MAX_HOLD} bars")
+    if not len(train_cat) or not len(val_cat):
+        raise SystemExit("purged train/validation split produced an empty partition")
 
     env = make_env(arr, train_cat, seed=args.seed)
     timesteps = 20_000 if args.quick else args.timesteps
@@ -195,16 +214,67 @@ def main():
 
     export_policy(model, out_npz)
 
-    # ── benchmark on the unseen holdout ────────────────────────────────
+    # ── benchmark on reusable validation data ──────────────────────────
+    # This is intentionally NOT called OOS/test: developers may rerun it. Final
+    # certification belongs on fresh post-protocol data via optimize_exit --certify.
     policy = NumpyMlpPolicy.load(out_npz)
-    print("\n── holdout exit comparison (same entries, different exits) ──")
-    _report("fixed 2R (current)", eval_fixed_2r(arr, hold_cat))
+    print("\n── VALIDATION exit comparison (reusable; not final OOS) ──")
+    fixed_stats = eval_fixed_2r(arr, val_cat)
+    _report("fixed 2R (current)", fixed_stats)
+    constant_stats = {}
     for a in range(N_ACTIONS):
-        _report(f"const trail {TRAIL_MULTS[a]:.2f}x ATR",
-                eval_policy(arr, hold_cat, lambda o, a=a: a))
-    _report("PPO trailing exit", eval_policy(arr, hold_cat, policy.action))
-    print(f"\nDone. The live bot loads {os.path.basename(out_npz)} "
-          f"on --timeframe {args.timeframe}.")
+        stats = eval_policy(arr, val_cat, lambda o, a=a: a)
+        constant_stats[str(float(TRAIL_MULTS[a]))] = stats
+        _report(f"const trail {TRAIL_MULTS[a]:.2f}x ATR", stats)
+    ppo_stats = eval_policy(arr, val_cat, policy.action)
+    _report("PPO trailing exit", ppo_stats)
+
+    def _stats_dict(stats):
+        mean_r, wr, pf, n = stats
+        return {"meanR": float(mean_r), "wr": float(wr),
+                "pf": float(pf), "n": int(n)}
+
+    write_policy_metadata(out_npz, {
+        "protocol_version": int(validation_protocol()["protocol_version"]),
+        "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "timeframe_min": int(args.timeframe),
+        "dataset": os.path.relpath(csv, REPO),
+        "dataset_sha256": file_sha256(csv),
+        "train_cut_bar": int(cut),
+        "train_entries": int(len(train_cat)),
+        "validation_entries": int(len(val_cat)),
+        "embargo_bars": int(MAX_HOLD),
+        "historical_probability_filter": (
+            "none" if args.proba_floor == 0 else "unsafe_final_model"),
+        "quick": bool(args.quick),
+        "seed": int(args.seed),
+        "requested_timesteps": int(timesteps),
+        "actual_timesteps": int(model.num_timesteps),
+        "training_device": str(model.device),
+        "software": {
+            "python": platform.python_version(),
+            "stable_baselines3": stable_baselines3.__version__,
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+        },
+        "config": {"ACTIVATE_R": config.ACTIVATE_R,
+                   "GIVEBACK_R": config.GIVEBACK_R,
+                   "STOP_ATR": config.STOP_ATR},
+        "validation": {
+            "fixed_2r": _stats_dict(fixed_stats),
+            "constant_trails": {k: _stats_dict(v)
+                                for k, v in constant_stats.items()},
+            "ppo_policy": _stats_dict(ppo_stats),
+        },
+        "certified": False,
+    })
+    if args.quick or args.proba_floor > 0:
+        reason = "smoke" if args.quick else "unsafe-filter research"
+        print(f"\n{reason.capitalize()} artifact only → {os.path.basename(out_npz)} "
+              "(live policy unchanged).")
+    else:
+        print(f"\nDone. The live bot loads {os.path.basename(out_npz)} "
+              f"on --timeframe {args.timeframe}.")
 
 
 if __name__ == "__main__":

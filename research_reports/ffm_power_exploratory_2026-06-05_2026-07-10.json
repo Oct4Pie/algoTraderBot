@@ -1,0 +1,631 @@
+{
+  "kind": "EXPLORATORY / CONSUMED DATA \u2014 not OOS certification",
+  "created_utc": "2026-07-14T02:50:36.088071+00:00",
+  "symbol": "NQ",
+  "timeframe_min": 3,
+  "window": {
+    "start": "2026-06-05T00:00:00+00:00",
+    "data_through": "2026-07-10T20:57:00+00:00"
+  },
+  "frozen_design": {
+    "target_R": 3.0,
+    "stop_R": 1.0,
+    "horizons_bars": [
+      20,
+      40,
+      80
+    ],
+    "live_probability_threshold": 0.35,
+    "same_bar_tie": "stop first",
+    "costs": "not included",
+    "threshold_sweep": false
+  },
+  "limitations": [
+    "June/July outcomes were previously consumed by exit-policy certification.",
+    "Bundles omitted exact labeler horizon/barrier configuration; 3R/1R and 20/40/80 bars are a predeclared robustness grid, not recovered truth.",
+    "Only NQ has matching post-cutoff data.",
+    "Live reconstruction emits 68/76 FFM features; missing fields remain NaN.",
+    "Twenty-six resampled bars contain two source minutes and no forward fill.",
+    "Booster score parity is verified for XGBoost 3.1.2\u20133.3.0; this run pins 3.3.0. Versions <=3.0 materially change probabilities."
+  ],
+  "datasets": {
+    "training_context": {
+      "path": "data/NQ_3min.csv",
+      "sha256": "e1d949ef902a6ac37f12e889199dbf475b0325de7b316cbaa64c806a0264ee1f"
+    },
+    "exploratory_window": {
+      "path": "data/certification/NQ_3min.csv",
+      "sha256": "0553dca991eacc0d8700f6b2ad7bb8002a140b75aea9ce0681f9705d50f47ae2"
+    }
+  },
+  "models": {
+    "supertrend": {
+      "path": "models/supertrend_chronos.joblib",
+      "sha256": "f61d31fc4a4f36a361c24eab0d72fa33e4dfc8c676b169f229306bf959dec89c",
+      "labeler_name": "SuperTrendChronos",
+      "labeler_config": {},
+      "feat_dim": 334,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-05-04 23:57:00+00:00"
+        ],
+        "holdout_span": [
+          "2026-05-04 23:57:00+00:00",
+          "2026-06-04 23:57:00+00:00"
+        ],
+        "n_train_signals": 95421,
+        "label_dist": [
+          67081,
+          28340
+        ],
+        "train_date": "2026-06-05",
+        "seed": 0
+      }
+    },
+    "ema": {
+      "path": "models/ema_cross_chronos.joblib",
+      "sha256": "bfce523c7ef87267ce4ac1ec49b28eb460f08e76afd88ad89ed9b874405c5422",
+      "labeler_name": "EMACrossChronos",
+      "labeler_config": {},
+      "feat_dim": 337,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-06-04 23:57:00.000000001+00:00"
+        ],
+        "holdout_span": null,
+        "n_train_signals": 85158,
+        "label_dist": [
+          59894,
+          25264
+        ],
+        "train_date": "2026-06-14",
+        "seed": 0
+      }
+    },
+    "keltner": {
+      "path": "models/keltner_adx_chronos.joblib",
+      "sha256": "a9515df55111523a0e99d4bf902feeb62fac5b7b0dd7214f99175e7ddccac6d3",
+      "labeler_name": "KeltnerADXChronos",
+      "labeler_config": {},
+      "feat_dim": 336,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-05-04 23:57:00+00:00"
+        ],
+        "holdout_span": [
+          "2026-05-04 23:57:00+00:00",
+          "2026-06-04 23:57:00+00:00"
+        ],
+        "n_train_signals": 88433,
+        "label_dist": [
+          61299,
+          27134
+        ],
+        "train_date": "2026-06-13",
+        "seed": 0
+      }
+    },
+    "bos": {
+      "path": "models/bos_chronos.joblib",
+      "sha256": "6579076feaf054a5bb0e873bfdc741e504fd0daba6569faec0fe7a946b981192",
+      "labeler_name": "BOSChronos",
+      "labeler_config": {},
+      "feat_dim": 337,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-06-04 23:57:00.000000001+00:00"
+        ],
+        "holdout_span": null,
+        "n_train_signals": 182752,
+        "label_dist": [
+          129721,
+          53031
+        ],
+        "train_date": "2026-06-14",
+        "seed": 0
+      }
+    },
+    "orb": {
+      "path": "models/orb_chronos.joblib",
+      "sha256": "47f02cb4fc11cc2aff40ac6623f318b3d3c60786b722bc43660333445d2db330",
+      "labeler_name": "ORBChronos",
+      "labeler_config": {},
+      "feat_dim": 339,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-06-04 23:57:00.000000001+00:00"
+        ],
+        "holdout_span": null,
+        "n_train_signals": 22684,
+        "label_dist": [
+          15746,
+          6938
+        ],
+        "train_date": "2026-06-15",
+        "seed": 0
+      }
+    },
+    "cisd_ote": {
+      "path": "models/cisd_ote_chronos.joblib",
+      "sha256": "57babace889bc042ae34fc8bfb3123eb3299166cd414c22e4f573be5d286d26a",
+      "labeler_name": "CISDOTEChronos",
+      "labeler_config": {},
+      "feat_dim": 343,
+      "ctx_window": 128,
+      "training_metadata": {
+        "train_span": [
+          "2021-04-25 22:00:00+00:00",
+          "2026-05-04 23:57:00+00:00"
+        ],
+        "holdout_span": [
+          "2026-05-04 23:57:00+00:00",
+          "2026-06-04 23:57:00+00:00"
+        ],
+        "n_train_signals": 28470,
+        "label_dist": [
+          16998,
+          11472
+        ],
+        "train_date": "2026-06-21",
+        "seed": 0
+      }
+    }
+  },
+  "summaries": {
+    "supertrend": {
+      "signals": 325,
+      "days": 29,
+      "proba": {
+        "mean": 0.2857899878116754,
+        "median": 0.27899014949798584,
+        "min": 0.13655851781368256,
+        "max": 0.48525360226631165
+      },
+      "frozen_threshold": 0.35,
+      "accepted": 49,
+      "horizons": {
+        "20": {
+          "positive_rate": 0.2523076923076923,
+          "target_hit_rate": 0.24307692307692308,
+          "roc_auc_profitable": 0.528856770049182,
+          "average_precision_profitable": 0.3124966164280054,
+          "brier_profitable": 0.19098944830493414,
+          "roc_auc_target_hit": 0.5372028403828343,
+          "rank_corr_proba_realizedR": 0.04657848988825588,
+          "all_meanR": -0.0025690695789939554,
+          "accepted_meanR": 0.3606720414924522,
+          "rejected_meanR": -0.06705752770399707,
+          "accepted_minus_rejected_meanR": 0.4277295691964493,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.4620114606739548,
+              0.5987523358381528
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.14520776015334794,
+              1.0713065960822383
+            ],
+            "iterations": 2000
+          }
+        },
+        "40": {
+          "positive_rate": 0.24923076923076923,
+          "target_hit_rate": 0.24923076923076923,
+          "roc_auc_profitable": 0.5372394252175673,
+          "average_precision_profitable": 0.3132301928891299,
+          "brier_profitable": 0.1887757572904242,
+          "roc_auc_target_hit": 0.5372394252175673,
+          "rank_corr_proba_realizedR": 0.055801992913359744,
+          "all_meanR": -0.003076923076923077,
+          "accepted_meanR": 0.3877551020408163,
+          "rejected_meanR": -0.07246376811594203,
+          "accepted_minus_rejected_meanR": 0.46021887015675833,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.46638481992255576,
+              0.600896430304954
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.14928041059296185,
+              1.0976831339809672
+            ],
+            "iterations": 2000
+          }
+        },
+        "80": {
+          "positive_rate": 0.24923076923076923,
+          "target_hit_rate": 0.24923076923076923,
+          "roc_auc_profitable": 0.5372394252175673,
+          "average_precision_profitable": 0.3132301928891299,
+          "brier_profitable": 0.1887757572904242,
+          "roc_auc_target_hit": 0.5372394252175673,
+          "rank_corr_proba_realizedR": 0.055801992913359744,
+          "all_meanR": -0.003076923076923077,
+          "accepted_meanR": 0.3877551020408163,
+          "rejected_meanR": -0.07246376811594203,
+          "accepted_minus_rejected_meanR": 0.46021887015675833,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.47057902466218965,
+              0.5999794633690002
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.14443021170535258,
+              1.066428876288031
+            ],
+            "iterations": 2000
+          }
+        }
+      }
+    },
+    "ema": {
+      "signals": 257,
+      "days": 28,
+      "proba": {
+        "mean": 0.2702099275612182,
+        "median": 0.26025354862213135,
+        "min": 0.14756107330322266,
+        "max": 0.5850511789321899
+      },
+      "frozen_threshold": 0.35,
+      "accepted": 26,
+      "horizons": {
+        "20": {
+          "positive_rate": 0.2490272373540856,
+          "target_hit_rate": 0.245136186770428,
+          "roc_auc_profitable": 0.5116580310880829,
+          "average_precision_profitable": 0.2721046189345302,
+          "brier_profitable": 0.19031919843595954,
+          "roc_auc_target_hit": 0.5013909343806251,
+          "rank_corr_proba_realizedR": 0.013688020800322873,
+          "all_meanR": -0.009054746952800938,
+          "accepted_meanR": 0.025881924351159966,
+          "rejected_meanR": -0.012987012987012988,
+          "accepted_minus_rejected_meanR": 0.038868937338172954,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.43846410850338524,
+              0.589009402742288
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6600723541425217,
+              0.6394341829586889
+            ],
+            "iterations": 2000
+          }
+        },
+        "40": {
+          "positive_rate": 0.2490272373540856,
+          "target_hit_rate": 0.2490272373540856,
+          "roc_auc_profitable": 0.5116580310880829,
+          "average_precision_profitable": 0.2721046189345302,
+          "brier_profitable": 0.19031919843595954,
+          "roc_auc_target_hit": 0.5116580310880829,
+          "rank_corr_proba_realizedR": 0.017464438934718014,
+          "all_meanR": -0.0038910505836575876,
+          "accepted_meanR": 0.07692307692307693,
+          "rejected_meanR": -0.012987012987012988,
+          "accepted_minus_rejected_meanR": 0.08991008991008992,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.43686789079367316,
+              0.5905442256516154
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6377111816669906,
+              0.6636583047929849
+            ],
+            "iterations": 2000
+          }
+        },
+        "80": {
+          "positive_rate": 0.2490272373540856,
+          "target_hit_rate": 0.2490272373540856,
+          "roc_auc_profitable": 0.5116580310880829,
+          "average_precision_profitable": 0.2721046189345302,
+          "brier_profitable": 0.19031919843595954,
+          "roc_auc_target_hit": 0.5116580310880829,
+          "rank_corr_proba_realizedR": 0.017464438934718014,
+          "all_meanR": -0.0038910505836575876,
+          "accepted_meanR": 0.07692307692307693,
+          "rejected_meanR": -0.012987012987012988,
+          "accepted_minus_rejected_meanR": 0.08991008991008992,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.43445235043645924,
+              0.590485654350244
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6190129372904258,
+              0.6497391617197328
+            ],
+            "iterations": 2000
+          }
+        }
+      }
+    },
+    "keltner": {
+      "signals": 551,
+      "days": 30,
+      "proba": {
+        "mean": 0.28159148396143246,
+        "median": 0.2792273163795471,
+        "min": 0.1315484195947647,
+        "max": 0.49500125646591187
+      },
+      "frozen_threshold": 0.35,
+      "accepted": 57,
+      "horizons": {
+        "20": {
+          "positive_rate": 0.2577132486388385,
+          "target_hit_rate": 0.2558983666061706,
+          "roc_auc_profitable": 0.4619649436964082,
+          "average_precision_profitable": 0.26637198316262767,
+          "brier_profitable": 0.19692459583806873,
+          "roc_auc_target_hit": 0.45710084760422076,
+          "rank_corr_proba_realizedR": -0.05953540999698642,
+          "all_meanR": 0.028444519116388674,
+          "accepted_meanR": 0.09952508830052911,
+          "rejected_meanR": 0.020242914979757085,
+          "accepted_minus_rejected_meanR": 0.07928217332077203,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.41002340734929704,
+              0.5164760766502193
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.44600553886268174,
+              0.6449364242606905
+            ],
+            "iterations": 2000
+          }
+        },
+        "40": {
+          "positive_rate": 0.2577132486388385,
+          "target_hit_rate": 0.2577132486388385,
+          "roc_auc_profitable": 0.4619649436964082,
+          "average_precision_profitable": 0.26637198316262767,
+          "brier_profitable": 0.19692459583806873,
+          "roc_auc_target_hit": 0.4619649436964082,
+          "rank_corr_proba_realizedR": -0.05762748005505203,
+          "all_meanR": 0.030852994555353903,
+          "accepted_meanR": 0.12280701754385964,
+          "rejected_meanR": 0.020242914979757085,
+          "accepted_minus_rejected_meanR": 0.10256410256410256,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.40776834222137726,
+              0.5203763262199056
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.405554361646551,
+              0.7050265369305617
+            ],
+            "iterations": 2000
+          }
+        },
+        "80": {
+          "positive_rate": 0.2577132486388385,
+          "target_hit_rate": 0.2577132486388385,
+          "roc_auc_profitable": 0.4619649436964082,
+          "average_precision_profitable": 0.26637198316262767,
+          "brier_profitable": 0.19692459583806873,
+          "roc_auc_target_hit": 0.4619649436964082,
+          "rank_corr_proba_realizedR": -0.05762748005505203,
+          "all_meanR": 0.030852994555353903,
+          "accepted_meanR": 0.12280701754385964,
+          "rejected_meanR": 0.020242914979757085,
+          "accepted_minus_rejected_meanR": 0.10256410256410256,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.40875702220289967,
+              0.5178217910675144
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.4168505707582628,
+              0.673589745720305
+            ],
+            "iterations": 2000
+          }
+        }
+      }
+    },
+    "bos": {
+      "signals": 1198,
+      "days": 31,
+      "proba": {
+        "mean": 0.27321574344410127,
+        "median": 0.2709789276123047,
+        "min": 0.13282354176044464,
+        "max": 0.45209479331970215
+      },
+      "frozen_threshold": 0.35,
+      "accepted": 38,
+      "horizons": {
+        "20": {
+          "positive_rate": 0.2587646076794658,
+          "target_hit_rate": 0.25375626043405675,
+          "roc_auc_profitable": 0.4810810810810811,
+          "average_precision_profitable": 0.2540908470143318,
+          "brier_profitable": 0.1940726273393098,
+          "roc_auc_target_hit": 0.4838396326386436,
+          "rank_corr_proba_realizedR": -0.027636858508579915,
+          "all_meanR": 0.025109977561043946,
+          "accepted_meanR": 0.12297184297710945,
+          "rejected_meanR": 0.021904157831896972,
+          "accepted_minus_rejected_meanR": 0.10106768514521247,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.4453419984167319,
+              0.5167388153450145
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6556842471391889,
+              0.7047950931919195
+            ],
+            "iterations": 2000
+          }
+        },
+        "40": {
+          "positive_rate": 0.25626043405676124,
+          "target_hit_rate": 0.25542570951585974,
+          "roc_auc_profitable": 0.48331669938618904,
+          "average_precision_profitable": 0.25253403263588253,
+          "brier_profitable": 0.19281659142172042,
+          "roc_auc_target_hit": 0.48475556141739207,
+          "rank_corr_proba_realizedR": -0.024677653327049694,
+          "all_meanR": 0.023556855945450993,
+          "accepted_meanR": 0.15789473684210525,
+          "rejected_meanR": 0.01915613226090542,
+          "accepted_minus_rejected_meanR": 0.13873860458119983,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.44653056937504754,
+              0.5181141012129994
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6330996823334532,
+              0.7430017718029033
+            ],
+            "iterations": 2000
+          }
+        },
+        "80": {
+          "positive_rate": 0.25626043405676124,
+          "target_hit_rate": 0.25626043405676124,
+          "roc_auc_profitable": 0.48331669938618904,
+          "average_precision_profitable": 0.25253403263588253,
+          "brier_profitable": 0.19281659142172042,
+          "roc_auc_target_hit": 0.48331669938618904,
+          "rank_corr_proba_realizedR": -0.02523039044631246,
+          "all_meanR": 0.025041736227045076,
+          "accepted_meanR": 0.15789473684210525,
+          "rejected_meanR": 0.020689655172413793,
+          "accepted_minus_rejected_meanR": 0.13720508166969148,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.447554492020662,
+              0.5188781549791482
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.6010548114382791,
+              0.7384990728068477
+            ],
+            "iterations": 2000
+          }
+        }
+      }
+    },
+    "orb": {
+      "signals": 71,
+      "days": 25,
+      "proba": {
+        "mean": 0.2760384820506606,
+        "median": 0.27250218391418457,
+        "min": 0.10668713599443436,
+        "max": 0.47311434149742126
+      },
+      "frozen_threshold": 0.35,
+      "accepted": 9,
+      "horizons": {
+        "20": {
+          "positive_rate": 0.23943661971830985,
+          "target_hit_rate": 0.23943661971830985,
+          "roc_auc_profitable": 0.5773420479302832,
+          "average_precision_profitable": 0.42645114500933307,
+          "brier_profitable": 0.17647187955964302,
+          "roc_auc_target_hit": 0.5773420479302832,
+          "rank_corr_proba_realizedR": 0.11434373203145509,
+          "all_meanR": -0.04225352112676056,
+          "accepted_meanR": 0.3333333333333333,
+          "rejected_meanR": -0.0967741935483871,
+          "accepted_minus_rejected_meanR": 0.4301075268817204,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.4321265057406362,
+              0.7593621590772558
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.8975806451612902,
+              1.7696593476100115
+            ],
+            "iterations": 2000
+          }
+        },
+        "40": {
+          "positive_rate": 0.23943661971830985,
+          "target_hit_rate": 0.23943661971830985,
+          "roc_auc_profitable": 0.5773420479302832,
+          "average_precision_profitable": 0.42645114500933307,
+          "brier_profitable": 0.17647187955964302,
+          "roc_auc_target_hit": 0.5773420479302832,
+          "rank_corr_proba_realizedR": 0.11434373203145509,
+          "all_meanR": -0.04225352112676056,
+          "accepted_meanR": 0.3333333333333333,
+          "rejected_meanR": -0.0967741935483871,
+          "accepted_minus_rejected_meanR": 0.4301075268817204,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.4224492402058104,
+              0.7717139057750757
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.8333641975308641,
+              1.712373737373736
+            ],
+            "iterations": 2000
+          }
+        },
+        "80": {
+          "positive_rate": 0.23943661971830985,
+          "target_hit_rate": 0.23943661971830985,
+          "roc_auc_profitable": 0.5773420479302832,
+          "average_precision_profitable": 0.42645114500933307,
+          "brier_profitable": 0.17647187955964302,
+          "roc_auc_target_hit": 0.5773420479302832,
+          "rank_corr_proba_realizedR": 0.11434373203145509,
+          "all_meanR": -0.04225352112676056,
+          "accepted_meanR": 0.3333333333333333,
+          "rejected_meanR": -0.0967741935483871,
+          "accepted_minus_rejected_meanR": 0.4301075268817204,
+          "bootstrap": {
+            "auc_95ci_day_bootstrap": [
+              0.433316108339273,
+              0.7606763631696246
+            ],
+            "accepted_minus_rejected_meanR_95ci_day_bootstrap": [
+              -0.9033121734248823,
+              1.6301798794160145
+            ],
+            "iterations": 2000
+          }
+        }
+      }
+    },
+    "cisd_ote": {
+      "signals": 0
+    }
+  },
+  "events": {
+    "path": "research_reports/ffm_power_exploratory_2026-06-05_2026-07-10_events.csv",
+    "sha256": "454ce6ec46c5c1f4fdfc5c7562bd039461453d96369ea315a9ab1e7658da41c1",
+    "rows": 2402
+  },
+  "software": {
+    "python": "3.13.13",
+    "numpy": "1.26.4",
+    "pandas": "3.0.3",
+    "scikit_learn": "1.9.0",
+    "xgboost": "3.3.0"
+  }
+}
